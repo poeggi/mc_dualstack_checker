@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - name: gofmt
+        working-directory: backend
+        run: test -z "$(gofmt -l .)"
+      - name: vet and build
+        working-directory: backend
+        run: |
+          go vet ./...
+          go build ./...
+      - name: smoke test
+        working-directory: backend
+        run: |
+          go run . &
+          sleep 2
+          curl -fsS localhost:8080/healthz
+          curl -fsS 'localhost:8080/check?host=127.0.0.1&edition=java&nofallback=1' | grep -q '"state":"offline"'
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check frontend/mc_dualstack_check.js
+      - run: node --check frontend/config.js
+      - name: ascii only
+        run: |
+          ! LC_ALL=C grep -rn '[^ -~	]' frontend/*.js frontend/*.html frontend/*.css backend/*.go backend/Dockerfile README.md

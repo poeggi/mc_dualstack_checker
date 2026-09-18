@@ -1,0 +1,37 @@
+name: Deploy frontend
+
+# Uploads frontend/ to the web host via FTPS on every published release.
+# Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASSWORD
+# Required GitHub variables: FTP_TARGET_DIR (e.g. /mc_dualstack_check/), MC_API_BASE
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: write config.js
+        run: |
+          test -n "${{ vars.MC_API_BASE }}"
+          printf 'window.MC_API_BASE = "%s";\n' "${{ vars.MC_API_BASE }}" > frontend/config.js
+          cat frontend/config.js
+
+      - uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: frontend/
+          server-dir: ${{ vars.FTP_TARGET_DIR }}
+          exclude: |
+            **/.gitkeep

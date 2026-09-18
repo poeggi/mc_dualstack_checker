@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minecraft Server Dualstack Checker - IPv4 &amp; IPv6 Status</title>
+    <meta name="description" content="Check the online status of any Minecraft server over both IPv4 and IPv6. Supports Bedrock and Java editions with automatic port fallback.">
+    <meta name="keywords" content="Minecraft server status, Minecraft dualstack server checker, IPv4 IPv6 dual stack, Bedrock server status, Java server status, MC server ping, Minecraft online checker">
+    <link rel="stylesheet" href="mc_dualstack_check.css">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <script src="config.js"></script>
+    <script src="mc_dualstack_check.js" defer></script>
+</head>
+<body><main>
+<div class="page">
+
+    <header class="header">
+        <img src="favicon.svg" width="16" height="16" alt="" aria-hidden="true">
+        <h1>MC Server Dualstack Check</h1>
+    </header>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="get" id="mcform" autocomplete="on">
+                <div class="form-row">
+                    <div class="field">
+                        <label for="f-host">HOSTNAME | IP ADDRESS</label>
+                        <input name="host" id="f-host" placeholder="e.g. play.example.com" autocapitalize="none" autocorrect="off" spellcheck="false">
+                    </div>
+                    <div class="field field-indent">
+                        <label for="f-port4">IPv4 PORT</label>
+                        <input name="port4" id="f-port4" placeholder="19132" inputmode="numeric">
+                    </div>
+                    <div class="field field-indent">
+                        <label for="f-port6">IPv6 PORT</label>
+                        <input name="port6" id="f-port6" placeholder="as IPv4" inputmode="numeric">
+                    </div>
+                    <div class="field field-indent">
+                        <label for="f-edition">EDITION</label>
+                        <select name="edition" id="f-edition">
+                            <option value="bedrock" selected>Bedrock</option>
+                            <option value="java">Java</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <label class="check-label" title="If enabled, skips automatic retry on fallback ports.">
+                        <input type="checkbox" id="f-nofallback" name="nofallback" value="1">
+                        Disable port fallback
+                    </label>
+                    <button type="submit" id="f-submit">Check</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="port-error" id="port-error" hidden></div>
+    <div class="notice-error" id="notice" role="alert" hidden></div>
+
+    <div class="checking-indicator" id="checking-indicator" hidden>
+        <span class="checking-spinner"></span>
+        <span class="checking-label">Checking&hellip;</span>
+    </div>
+
+</div><!-- /.page -->
+
+<div class="page page-results" id="results" hidden>
+    <div class="query-time" id="query-time">
+        <span id="time-ago"></span>
+    </div>
+    <div class="ip-grid" id="ip-grid"></div>
+    <div class="card debug-card" id="debug-card" hidden>
+        <div class="card-head">Debug Log</div>
+        <div class="debug-log" id="debug-log"></div>
+    </div>
+</div><!-- /.page-results -->
+
+<footer class="site-footer">
+    No queries are logged or stored beyond standard server access logs.
+</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+name: Deploy backend
+
+# Deploys backend/ to Cloud Run on every published release.
+# One-time GCP setup (network, subnet, IAM) is described in README.md.
+# Required GitHub secrets: GCP_WIF_PROVIDER, GCP_SA_EMAIL
+# Required GitHub variables: GCP_PROJECT, GCP_REGION, ALLOWED_ORIGINS
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - uses: google-github-actions/deploy-cloudrun@v2
+        id: deploy
+        with:
+          project_id: ${{ vars.GCP_PROJECT }}
+          region: ${{ vars.GCP_REGION }}
+          service: mc-dualstack-check
+          source: backend
+          env_vars: |
+            ALLOWED_ORIGINS=${{ vars.ALLOWED_ORIGINS }}
+          flags: --allow-unauthenticated --max-instances=3 --cpu=1 --memory=128Mi --concurrency=20
+
+      - name: health check
+        run: |
+          curl -fsS "${{ steps.deploy.outputs.url }}/healthz"
+          echo
