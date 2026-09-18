@@ -28,8 +28,7 @@ jobs:
 
       - name: write config.js
         run: |
-          printf 'window.MC_API_BASE = "%s";
-' "${{ vars.MC_API_BASE }}" > frontend/config.js
+          printf 'window.MC_API_BASE = "%s";\n' "${{ vars.MC_API_BASE }}" > frontend/config.js
           cat frontend/config.js
 
       - name: install lftp
