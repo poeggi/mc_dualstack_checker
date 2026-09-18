@@ -2,7 +2,7 @@ name: Deploy frontend
 
 # Uploads frontend/ to the web host via FTPS on every published release.
 # Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
-# Required GitHub variables: FTP_TARGET_DIR (e.g. /mc_dualstack_check/), MC_API_BASE
+# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder), MC_API_BASE
 
 on:
   release:
