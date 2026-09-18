@@ -124,8 +124,66 @@ function fillForm(q) {
     port6El.placeholder = q.port4 || "as IPv4";
 }
 
-// -- Check -------------------------------------------------------
+// -- Check orchestration -----------------------------------------
+// The backend only resolves names and runs single probes. Everything
+// else (literal IP handling, fallback order, per-family independence,
+// the log) happens here.
 var retryTimer = null;
+
+function api(path, params) {
+    return fetch(API_BASE + path + "?" + params.toString(), { cache: "no-store" }).then(
+        function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
+                if (!res.ok) throw { message: body.error || ("Request failed (" + res.status + ")") };
+                return body;
+            });
+        },
+        function () { throw { unreachable: true }; }
+    );
+}
+
+function literalIP(host) {
+    var h = host.replace(/^\[|\]$/g, "");
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+    if (m && m.slice(1).every(function (o) { return +o <= 255; })) return { family: 4, ip: h };
+    if (h.indexOf(":") >= 0 && /^[0-9a-fA-F:.]+$/.test(h)) return { family: 6, ip: h };
+    return null;
+}
+
+// Probes one family on the given ports in order; stops at the first answer.
+function checkFamily(family, ip, ports, edition, hostLabel, log) {
+    var result = { state: "offline", ip: ip, ports_tried: [] };
+    var i = 0;
+    function next() {
+        if (i >= ports.length) {
+            log.push("OFFLINE: " + family + " did not respond on any port");
+            return result;
+        }
+        var port = ports[i++];
+        if (result.ports_tried.length) log.push("Port " + ports[i - 2] + " failed, retrying port " + port);
+        log.push("Checking " + family + ": " + ip + " port " + port);
+        result.ports_tried.push(port);
+        var params = new URLSearchParams({ ip: ip, port: port, edition: edition });
+        if (hostLabel) params.set("host", hostLabel);
+        return api("/ping", params).then(function (r) {
+            if (r.state === "online") {
+                log.push("ONLINE: " + family + " responded on port " + port + " (" + r.rtt_ms + " ms)");
+                result.state = "online"; result.port = port; result.info = r.info; result.rtt_ms = r.rtt_ms;
+                return result;
+            }
+            if (r.state === "no_route") {
+                log.push("ERROR: checker has no " + family + " connectivity: " + r.error);
+                result.state = "no_route";
+                result.reason = "The checker host has no " + family + " connectivity";
+                return result;
+            }
+            log.push(family + " port " + port + ": " + (r.error || "no response"));
+            return next();
+        });
+    }
+    return next();
+}
 
 function runCheck(q) {
     if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
@@ -138,27 +196,56 @@ function runCheck(q) {
     }
     setBusy(true);
 
-    fetch(API_BASE + "/check?" + toParams(q).toString(), { cache: "no-store" })
-        .then(function (res) {
-            return res.json().then(function (body) { return { res: res, body: body }; });
-        })
-        .then(function (r) {
-            if (r.res.status === 429) {
-                startRetryCountdown(parseInt(r.res.headers.get("Retry-After"), 10) || 10);
-                return;
-            }
-            if (!r.res.ok) {
-                setBusy(false);
-                showNotice(r.body && r.body.error ? r.body.error : "Request failed (" + r.res.status + ")");
-                return;
-            }
-            setBusy(false);
-            render(r.body);
-        })
-        .catch(function () {
-            setBusy(false);
-            showNotice("The checker backend (" + API_BASE + ") could not be reached. Please try again in a moment.");
+    var edition = q.edition;
+    var defaults = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } }[edition];
+    var port4 = q.port4 ? parseInt(q.port4, 10) : defaults.v4;
+    var port6 = q.port6 ? parseInt(q.port6, 10) : port4;
+    // An IPv6 Bedrock listener commonly sits on 19133 while the form default is the IPv4 port.
+    var fb4 = q.nofallback ? [] : [defaults.v4];
+    var fb6 = q.nofallback ? [] : (edition === "bedrock" ? [defaults.v6, 19133, 19132] : [defaults.v6]);
+    var portList = function (first, fallbacks) {
+        return [first].concat(fallbacks).filter(function (p, i, a) { return a.indexOf(p) === i; });
+    };
+
+    var startedAt = Math.floor(Date.now() / 1000);
+    var log = [], log4 = [], log6 = [];
+    var literal = literalIP(q.host);
+    var hostLabel = literal ? "" : q.host;
+
+    var dns;
+    if (literal) {
+        log.push("Input is a literal IPv" + literal.family + " address, skipping DNS");
+        dns = Promise.resolve(literal.family === 4 ? { a: [literal.ip], aaaa: [] } : { a: [], aaaa: [literal.ip] });
+    } else {
+        dns = api("/resolve", new URLSearchParams({ host: q.host })).then(function (r) {
+            log.push("Resolved IPv4: " + (r.a.length ? r.a[0] : "no A record"));
+            log.push("Resolved IPv6: " + (r.aaaa.length ? r.aaaa[0] : "no AAAA record"));
+            return r;
         });
+    }
+
+    dns.then(function (r) {
+        var ip4 = r.a[0], ip6 = r.aaaa[0];
+        var skip = function (family) {
+            if (literal) return { state: "omitted", reason: "Input is a literal IPv" + literal.family + " address" };
+            return { state: "no_dns", reason: "No " + (family === 4 ? "A" : "AAAA") + " record found" };
+        };
+        return Promise.all([
+            ip4 ? checkFamily("IPv4", ip4, portList(port4, fb4), edition, hostLabel, log4) : skip(4),
+            ip6 ? checkFamily("IPv6", ip6, portList(port6, fb6), edition, hostLabel, log6) : skip(6)
+        ]);
+    }).then(function (both) {
+        setBusy(false);
+        render({ queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) });
+    }).catch(function (err) {
+        if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
+        setBusy(false);
+        if (err && err.unreachable) {
+            showNotice("The checker backend (" + API_BASE + ") could not be reached. Please try again in a moment.");
+        } else {
+            showNotice(err && err.message ? err.message : "Check failed.");
+        }
+    });
 }
 
 function startRetryCountdown(secs) {

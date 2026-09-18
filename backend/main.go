@@ -1,7 +1,9 @@
-// mc_dualstack_check backend: pings a Minecraft server over IPv4 and IPv6
-// separately and reports both results as JSON.
+// mc_dualstack_check backend. Two network primitives the browser cannot do
+// itself; everything else (fallback order, dual-stack logic, rendering)
+// lives in the frontend.
 //
-//	GET /check?host=<name|ip>&edition=bedrock|java&port4=&port6=&nofallback=1
+//	GET /resolve?host=<name>                          -> A and AAAA records
+//	GET /ping?ip=<addr>&port=<n>&edition=bedrock|java -> one probe
 //	GET /healthz
 package main
 
@@ -19,8 +21,9 @@ import (
 )
 
 const (
-	checkTimeout = 25 * time.Second
-	maxHostLen   = 253
+	resolveTimeout = 5 * time.Second
+	pingTimeout    = 8 * time.Second
+	maxHostLen     = 253
 )
 
 func main() {
@@ -31,80 +34,82 @@ func main() {
 	origins := strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /check", withCORS(origins, rateLimited(handleCheck)))
+	mux.HandleFunc("GET /resolve", withCORS(origins, rateLimited(handleResolve)))
+	mux.HandleFunc("GET /ping", withCORS(origins, rateLimited(handlePing)))
 	mux.HandleFunc("GET /healthz", withCORS(origins, handleHealth))
 
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      checkTimeout + 5*time.Second,
+		WriteTimeout:      pingTimeout + 2*time.Second,
 	}
 	log.Printf("listening on :%s (ipv6 egress: %v)", port, hasGlobalIPv6())
 	log.Fatal(srv.ListenAndServe())
 }
 
-func handleCheck(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	req := CheckRequest{
-		Host:       strings.TrimSpace(q.Get("host")),
-		Edition:    q.Get("edition"),
-		NoFallback: q.Get("nofallback") != "",
-	}
-	if req.Edition == "" {
-		req.Edition = "bedrock"
-	}
-	if _, ok := defaultPorts[req.Edition]; !ok {
-		httpError(w, http.StatusBadRequest, "edition must be bedrock or java")
-		return
-	}
-	if req.Host == "" || len(req.Host) > maxHostLen || strings.ContainsAny(req.Host, " /\\@#?") {
+func handleResolve(w http.ResponseWriter, r *http.Request) {
+	host := strings.TrimSpace(r.URL.Query().Get("host"))
+	if host == "" || len(host) > maxHostLen || strings.ContainsAny(host, " /\\@#?:[]") {
 		httpError(w, http.StatusBadRequest, "host is missing or invalid")
 		return
 	}
-	var err error
-	if req.Port4, err = parsePort(q.Get("port4")); err != nil {
-		httpError(w, http.StatusBadRequest, "IPv4 "+err.Error())
-		return
-	}
-	if req.Port6, err = parsePort(q.Get("port6")); err != nil {
-		httpError(w, http.StatusBadRequest, "IPv6 "+err.Error())
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), resolveTimeout)
 	defer cancel()
-	resp := runCheck(ctx, req)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(resp)
+	out := map[string][]string{"a": {}, "aaaa": {}}
+	if addrs, err := net.DefaultResolver.LookupIP(ctx, "ip4", host); err == nil {
+		for _, a := range addrs {
+			out["a"] = append(out["a"], a.String())
+		}
+	}
+	if addrs, err := net.DefaultResolver.LookupIP(ctx, "ip6", host); err == nil {
+		for _, a := range addrs {
+			out["aaaa"] = append(out["aaaa"], a.String())
+		}
+	}
+	writeJSON(w, out)
+}
+
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	edition := q.Get("edition")
+	if edition == "" {
+		edition = "bedrock"
+	}
+	if _, ok := editionNetworks[edition]; !ok {
+		httpError(w, http.StatusBadRequest, "edition must be bedrock or java")
+		return
+	}
+	ip := net.ParseIP(strings.Trim(q.Get("ip"), "[]"))
+	if ip == nil {
+		httpError(w, http.StatusBadRequest, "ip must be a literal IPv4 or IPv6 address")
+		return
+	}
+	port, err := strconv.Atoi(q.Get("port"))
+	if err != nil || port < 1 || port > 65535 {
+		httpError(w, http.StatusBadRequest, "port must be between 1 and 65535")
+		return
+	}
+	hostLabel := q.Get("host")
+	if len(hostLabel) > maxHostLen {
+		hostLabel = ""
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), pingTimeout)
+	defer cancel()
+	writeJSON(w, ping(ctx, edition, ip, port, hostLabel))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"ok": true, "ipv6": hasGlobalIPv6()})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":   true,
-		"ipv6": hasGlobalIPv6(),
-	})
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(v)
 }
-
-func parsePort(s string) (int, error) {
-	if s == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || n > 65535 {
-		return 0, errPort
-	}
-	return n, nil
-}
-
-var errPort = &portError{}
-
-type portError struct{}
-
-func (*portError) Error() string { return "port must be between 1 and 65535" }
 
 func httpError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -113,7 +118,7 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 }
 
 // hasGlobalIPv6 reports whether any interface carries a global unicast IPv6
-// address. It is a hint only; the real test is a check against a v6 target.
+// address. It is a hint only; the real test is a ping against a v6 target.
 func hasGlobalIPv6() bool {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -151,12 +156,12 @@ func originAllowed(allowed []string, origin string) bool {
 }
 
 // -- Rate limit --------------------------------------------------
-// Token bucket per client IP, in memory. Each instance keeps its own state,
-// which is enough to stop a single client from hammering the backend.
+// Token bucket per client IP, in memory. A full dual-stack check from the
+// frontend costs one resolve plus up to three pings per family.
 
 const (
-	rlBurst  = 5
-	rlRefill = 3 * time.Second
+	rlBurst  = 15
+	rlRefill = time.Second
 )
 
 type bucket struct {

@@ -27,7 +27,8 @@ jobs:
           go run . &
           sleep 2
           curl -fsS localhost:8080/healthz
-          curl -fsS 'localhost:8080/check?host=127.0.0.1&edition=java&nofallback=1' | grep -q '"state":"offline"'
+          curl -fsS 'localhost:8080/resolve?host=localhost' | grep -q '"a"'
+          curl -fsS 'localhost:8080/ping?ip=127.0.0.1&port=9&edition=java' | grep -q '"state":"offline"'
 
   frontend:
     runs-on: ubuntu-latest

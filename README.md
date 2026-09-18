@@ -1,31 +1,37 @@
 # mc_dualstack_check
 
-Checks a Minecraft server over IPv4 and IPv6 separately.
+Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
 Supports Bedrock (RakNet ping, UDP) and Java (Server List Ping, TCP).
 No third-party lookup service is involved.
 
 Live: https://www.poggensee.it/mc_dualstack_check/
 
+## Design principles
+
+**Thin backend, smart frontend.** The backend does only what a browser cannot: resolve a name and send one probe packet. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time on Cloud Run stays near zero. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend and ships as static files. Changing behaviour means editing JavaScript, not redeploying a service.
+
+**Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The backend must run on a host with real IPv6 egress. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
+
 ## Layout
 
-- `backend/` - Go service. Resolves A and AAAA, pings each address, returns JSON.
-- `frontend/` - static page. Calls the backend with `fetch` and renders the cards.
+- `backend/` - Go service with two primitives, `/resolve` and `/ping`.
+- `frontend/` - static page. Orchestrates the check and renders the cards.
 - `.github/workflows/` - CI on push, deploys on release.
 
 ## API
 
-`GET /check?host=<name|ip>&edition=bedrock|java&port4=<n>&port6=<n>&nofallback=1`
+`GET /resolve?host=<name>` -> `{"a":[...],"aaaa":[...]}`
 
-- `edition` defaults to `bedrock`.
-- `port4` defaults to the edition default (19132 / 25565).
-- `port6` defaults to `port4`.
-- Without `nofallback` the edition default ports are retried. For Bedrock IPv6 that includes 19133.
+`GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>]` -> one probe.
+`host` is only sent in the Java handshake; some proxies route on it.
 
-Each family result has a `state`: `online`, `offline`, `no_dns`, `omitted` (literal IP of the other family) or `no_route` (the checker host has no connectivity for that family).
+Ping `state` is `online`, `offline` or `no_route` (the checker host has no connectivity for that family). `online` carries `rtt_ms` and `info` (MOTD, version, protocol, players, and for Bedrock gamemode, map, server ID).
 
 `GET /healthz` reports `{"ok":true,"ipv6":<bool>}`. `ipv6` tells whether the host has a global IPv6 address.
 
-Requests are rate limited per client IP (burst 5, then one per 3 s). Over the limit the backend answers 429 with `Retry-After`.
+Requests are rate limited per client IP (burst 15, then one per second). A full check costs one resolve plus up to three pings per family. Over the limit the backend answers 429 with `Retry-After`.
+
+Frontend behaviour: a literal IP skips DNS and omits the other family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that includes 19133.
 
 ## Local development
 
