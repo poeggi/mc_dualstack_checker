@@ -1,13 +1,18 @@
 name: Deploy frontend
 
 # Uploads frontend/ to the web host via FTPS on every published release.
-# Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASSWORD
+# Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
 # Required GitHub variables: FTP_TARGET_DIR (e.g. /mc_dualstack_check/), MC_API_BASE
 
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Connect and list only, upload nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,7 +26,7 @@ jobs:
 
       - name: write config.js
         run: |
-          test -n "${{ vars.MC_API_BASE }}"
+          test -n "${{ vars.MC_API_BASE }}" || [ "${{ inputs.dry_run }}" = "true" ]
           printf 'window.MC_API_BASE = "%s";\n' "${{ vars.MC_API_BASE }}" > frontend/config.js
           cat frontend/config.js
 
@@ -29,9 +34,10 @@ jobs:
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USER }}
-          password: ${{ secrets.FTP_PASSWORD }}
+          password: ${{ secrets.FTP_PASS }}
           protocol: ftps
           local-dir: frontend/
           server-dir: ${{ vars.FTP_TARGET_DIR }}
+          dry-run: ${{ inputs.dry_run == true }}
           exclude: |
             **/.gitkeep
