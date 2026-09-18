@@ -1,8 +1,9 @@
 name: Deploy frontend
 
 # Uploads frontend/ to the web host via FTPS on every published release.
+# lftp, not curl or basic-ftp: the host resets the data socket for those.
 # Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
-# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder), MC_API_BASE
+# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder), MC_API_BASE, LIVE_URL (optional, for the post-deploy check)
 
 on:
   release:
@@ -27,17 +28,34 @@ jobs:
       - name: write config.js
         run: |
           test -n "${{ vars.MC_API_BASE }}" || [ "${{ inputs.dry_run }}" = "true" ]
-          printf 'window.MC_API_BASE = "%s";\n' "${{ vars.MC_API_BASE }}" > frontend/config.js
+          printf 'window.MC_API_BASE = "%s";
+' "${{ vars.MC_API_BASE }}" > frontend/config.js
           cat frontend/config.js
 
-      - uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_HOST }}
-          username: ${{ secrets.FTP_USER }}
-          password: ${{ secrets.FTP_PASS }}
-          protocol: ftps
-          local-dir: frontend/
-          server-dir: ${{ vars.FTP_TARGET_DIR }}
-          dry-run: ${{ inputs.dry_run == true }}
-          exclude: |
-            **/.gitkeep
+      - name: install lftp
+        # The runner image carries a Google Chrome apt source whose hash
+        # mismatch breaks apt-get update; lftp only needs Ubuntu's archive.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+      - name: mirror frontend/ to the FTP root
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          LFTP_PASSWORD: ${{ secrets.FTP_PASS }}
+          TARGET: ${{ vars.FTP_TARGET_DIR }}
+          DRY: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: |
+          lftp --env-password -u "$FTP_USER" "$FTP_HOST" -e "
+            set ssl:verify-certificate yes; set ftp:ssl-force true;
+            set ftp:ssl-protect-data true; set net:timeout 20; set net:max-retries 2;
+            set cmd:fail-exit on;
+            mirror -R --delete --verbose $DRY frontend/ ${TARGET:-./};
+            bye"
+
+      - name: verify live
+        if: ${{ !inputs.dry_run }}
+        run: |
+          test -n "${{ vars.LIVE_URL }}" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
+          curl -fsS "${{ vars.LIVE_URL }}config.js" | grep -F "${{ vars.MC_API_BASE }}"

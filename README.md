@@ -72,7 +72,7 @@ Variables: `GCP_PROJECT`, `GCP_REGION`, `ALLOWED_ORIGINS`.
 ### Frontend (FTPS to the web host)
 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
-Variables: `FTP_TARGET_DIR` (`./` when the FTP user is jailed at the target folder), `MC_API_BASE` (the Cloud Run service URL).
+Variables: `FTP_TARGET_DIR` (`./` when the FTP user is jailed at the target folder), `MC_API_BASE` (the Cloud Run service URL), `LIVE_URL` (optional, verifies the upload).
 
 The workflow writes `MC_API_BASE` into `frontend/config.js` before upload.
 
