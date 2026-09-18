@@ -3,7 +3,8 @@ name: Deploy frontend
 # Uploads frontend/ to the web host via FTPS on every published release.
 # lftp, not curl or basic-ftp: the host resets the data socket for those.
 # Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
-# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder), MC_API_BASE, LIVE_URL (optional, for the post-deploy check)
+# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder)
+# Optional: MC_API_BASE (empty = page says no backend is configured), LIVE_URL (post-deploy check)
 
 on:
   release:
@@ -27,7 +28,6 @@ jobs:
 
       - name: write config.js
         run: |
-          test -n "${{ vars.MC_API_BASE }}" || [ "${{ inputs.dry_run }}" = "true" ]
           printf 'window.MC_API_BASE = "%s";
 ' "${{ vars.MC_API_BASE }}" > frontend/config.js
           cat frontend/config.js

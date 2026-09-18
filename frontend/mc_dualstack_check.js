@@ -131,8 +131,12 @@ function runCheck(q) {
     if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
     showNotice("");
     $("results").hidden = true;
-    setBusy(true);
     document.title = q.host + " - Minecraft Server Dualstack Checker";
+    if (!API_BASE) {
+        showNotice("No checker backend is configured yet. The check cannot run.");
+        return;
+    }
+    setBusy(true);
 
     fetch(API_BASE + "/check?" + toParams(q).toString(), { cache: "no-store" })
         .then(function (res) {
@@ -153,7 +157,7 @@ function runCheck(q) {
         })
         .catch(function () {
             setBusy(false);
-            showNotice("The checker backend could not be reached. Please try again in a moment.");
+            showNotice("The checker backend (" + API_BASE + ") could not be reached. Please try again in a moment.");
         });
 }
 
