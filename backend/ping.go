@@ -36,7 +36,7 @@ type PingResult struct {
 	Error  string      `json:"error,omitempty"`
 	Info   *ServerInfo `json:"info,omitempty"`
 	Cached bool        `json:"cached,omitempty"`
-	AgeS   int         `json:"age_s,omitempty"`
+	AgeS   int         `json:"age_s"`
 }
 
 var editionNetworks = map[string]string{"bedrock": "udp", "java": "tcp"}

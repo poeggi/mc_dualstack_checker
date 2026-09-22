@@ -20,6 +20,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 - `backend/` - Go service with two primitives, `/resolve` and `/ping`. One static binary.
 - `frontend/` - the page plus `api.php`, the same-origin relay to the backend. `providers.js` holds the backend adapters. `.htaccess` enables PHP on the web host.
 - `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
+- `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
 - `.github/workflows/` - CI on push, deploys on release.
 
@@ -50,6 +51,11 @@ cd frontend && php -S localhost:8000
 ```
 
 `frontend/config.php` points at `http://localhost:8080` by default.
+
+## Tests
+
+- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, the cache and the limits. CI runs it on every push.
+- `sh test/live.sh` checks the deployed web interface and API end to end (hostnames, IPv4 and IPv6 literals, Bedrock and Java, versions). The "Live check" workflow runs it after each frontend deploy, once it sees the released version on the VM, plus daily and on demand.
 
 ## Deployment
 

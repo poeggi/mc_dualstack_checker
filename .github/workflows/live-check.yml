@@ -1,0 +1,40 @@
+name: Live check
+
+# Runs test/live.sh against the deployed web interface and API: after
+# every frontend deploy (waiting for the VM to pick up the release first),
+# daily, and on demand.
+
+on:
+  workflow_run:
+    workflows: ["Deploy frontend"]
+    types: [completed]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: wait for the VM to run the released version
+        if: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+        run: |
+          want="${{ github.event.workflow_run.head_branch }}"
+          for i in $(seq 1 60); do
+            got=$(curl -fsS https://mcdscheck-api.poggensee.it/healthz | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+            echo "attempt $i: want $want, got $got"
+            [ "$got" = "$want" ] && exit 0
+            sleep 15
+          done
+          exit 1
+
+      - name: live checks
+        env:
+          EXPECT_VERSION: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') && github.event.workflow_run.head_branch || '' }}
+        run: sh test/live.sh
