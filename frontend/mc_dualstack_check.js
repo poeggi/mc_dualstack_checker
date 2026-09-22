@@ -176,6 +176,7 @@ function checkFamily(family, ip, ports, edition, hostLabel, log) {
                 log.push("ERROR: checker has no " + family + " connectivity: " + r.error);
                 result.state = "no_route";
                 result.reason = "The checker host has no " + family + " connectivity";
+                result.cached = r.cached; result.age_s = r.age_s;
                 return result;
             }
             log.push(family + " port " + port + ": " + (r.error || "no response"));
@@ -310,7 +311,7 @@ function ipCard(r, label) {
     var head = el("div", "ip-card-head");
     head.appendChild(el("span", "", label));
     var badges = el("span", "badge-group");
-    if (state === "online" || state === "offline") {
+    if (state === "online" || state === "offline" || state === "no_route") {
         badges.appendChild(el("span", r.cached ? "badge cache" : "badge live", r.cached ? "Cached" : "Live"));
     }
     if (state === "online" && r.ports_tried.length > 1) badges.appendChild(el("span", "badge fallback", "Fallback"));
@@ -367,8 +368,7 @@ function render(data) {
     queriedAt = data.queried_at;
     cacheExpiry = 0;
     [data.ipv4, data.ipv6].forEach(function (r) {
-        var ttl = r.state === "online" ? provider.cacheTTL : provider.offlineTTL;
-        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + ttl - (r.age_s || 0));
+        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + provider.cacheTTL - (r.age_s || 0));
     });
     updateTimeAgo();
 

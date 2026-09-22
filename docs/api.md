@@ -65,7 +65,7 @@ Same shape as the site API's `resolve`, resolved on the backend host.
 
 ## Caching
 
-Probe results are cached per `edition`, `ip` and `port`: 60 seconds when online, 10 seconds when offline, so a lost packet does not look like an outage for a minute. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
+Probe results are cached for 60 seconds per `edition`, `ip` and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
 
 ## Limits
 

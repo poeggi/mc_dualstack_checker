@@ -35,7 +35,6 @@ PROVIDERS.own = {
     label: "the checker backend",
     notice: "",
     cacheTTL: 60,
-    offlineTTL: 10,
     resolve: function (host) { return api("resolve", { host: host }); },
     ping: function (ip, port, edition, host) {
         var params = { ip: ip, port: port, edition: edition };
@@ -51,7 +50,6 @@ PROVIDERS.mcsrvstat = {
     label: "api.mcsrvstat.us",
     notice: "Third-party results via mcsrvstat.us, cached up to 5 min.",
     cacheTTL: 300,
-    offlineTTL: 300,
     resolve: PROVIDERS.own.resolve,
     ping: function (ip, port, edition) {
         return api("ping", { ip: ip, port: port, edition: edition }).then(function (r) {
