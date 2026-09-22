@@ -1,0 +1,55 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Runs every 7 minutes from mcdc-tick.timer. Two jobs:
+#   1. Pull the latest GitHub release of the backend and install it if new.
+#      Outbound only: no deploy key, nothing connects into the VM.
+#   2. Keep the CPU busy for 30 s. Some free-tier clouds reclaim VMs
+#      whose CPU looks idle for days; this keeps the CPU busy at ~7 %
+#      average load.
+set -eu
+
+REPO="poeggi/mc_dualstack_checker"
+BIN="/usr/local/bin/mc_dualstack_check"
+STATE="/var/lib/mcdc/version"
+PAGE="/var/www/mcdc/index.html"
+BUSY_SECONDS=${BUSY_SECONDS:-30}
+
+case "$(uname -m)" in
+    x86_64)  ARCH=amd64 ;;
+    aarch64) ARCH=arm64 ;;
+    *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+
+update() {
+    latest=$(curl -fsS "https://api.github.com/repos/$REPO/releases/latest" \
+        | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p')
+    [ -n "$latest" ] || { echo "no release found" >&2; return 0; }
+    [ "$latest" != "$(cat "$STATE" 2>/dev/null)" ] || return 0
+
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    base="https://github.com/$REPO/releases/download/$latest"
+    asset="mc_dualstack_check_linux_$ARCH"
+    curl -fsSL -o "$tmp/$asset" "$base/$asset"
+    curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
+    (cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet)
+
+    install -m 755 "$tmp/$asset" "$BIN"
+    mkdir -p "$(dirname "$STATE")"
+    echo "$latest" > "$STATE"
+    systemctl restart mc-dualstack-check
+    echo "installed $latest"
+}
+
+# The landing page is static; stamp the installed version into it.
+stamp() {
+    ver=$(cat "$STATE" 2>/dev/null || echo dev)
+    grep -q "id=\"api-version\">$ver<" "$PAGE" 2>/dev/null && return 0
+    sed -i "s|\(id=\"api-version\">\)[^<]*|\1$ver|" "$PAGE"
+}
+
+update || echo "update failed, keeping current version" >&2
+stamp || true
+
+[ "$BUSY_SECONDS" -gt 0 ] && { timeout "$BUSY_SECONDS" sh -c 'while :; do :; done' || true; }
+exit 0

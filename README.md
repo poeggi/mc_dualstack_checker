@@ -1,0 +1,89 @@
+# mc_dualstack_check
+
+Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
+Supports Bedrock (RakNet ping, UDP) and Java (Server List Ping, TCP).
+The own backend does the probing. A third-party provider (mcsrvstat.us) exists as an interim option.
+
+Live: https://www.poggensee.it/mc_dualstack_check/
+API: https://mcdscheck-api.poggensee.it/
+
+Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone who runs a modified copy, also as a network service, has to offer its source under the same terms.
+
+## Design principles
+
+**Thin backend, smart frontend.** The backend does only what a browser cannot: resolve a name and send one probe packet. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus `api.php`, a same-origin relay so the browser never talks to third parties. Changing behaviour means editing JavaScript, not redeploying a service.
+
+**Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The backend must run on a host with real IPv6 egress. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
+
+## Layout
+
+- `backend/` - Go service with two primitives, `/resolve` and `/ping`. One static binary.
+- `frontend/` - the page plus `api.php`, the same-origin relay to the backend. `providers.js` holds the backend adapters. `.htaccess` enables PHP on the web host.
+- `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
+- `docs/api.md` - API reference.
+- `.github/workflows/` - CI on push, deploys on release.
+
+## Providers
+
+The browser only ever talks to this site. `api.php` resolves names itself (PHP `dns_get_record`) and relays each probe to the provider chosen in `config.php`:
+
+- `MC_PROVIDER = "own"`: the Go backend at `MC_BACKEND`. The default.
+- `MC_PROVIDER = "mcsrvstat"`: api.mcsrvstat.us, third-party. Answers cached up to 5 minutes on their side, and their IPv4 Bedrock path is unreliable at the time of writing. The page shows a notice.
+- `MC_PROVIDER = ""`: the page renders, Check explains that no backend is configured.
+
+`providers.js` maps each provider's answers to one result shape; the orchestration does not know which one is active.
+
+## API
+
+Documented in [docs/api.md](docs/api.md): the site API (`api.php`), the backend endpoints, the result shapes, the 60 s cache and the limits (more than 10 systems per minute per client starts a 60 s cooldown; 20 requests per client, refilled one per second; 64 probes in flight globally).
+
+Frontend behaviour: a literal IP skips DNS and omits the other family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, No DNS record, DNS error, Omitted, Unavailable (no route from the checker). A 429 from the API is shown as a countdown.
+
+## Local development
+
+```bash
+cd backend && go run .
+```
+
+```bash
+cd frontend && php -S localhost:8000
+```
+
+`frontend/config.php` points at `http://localhost:8080` by default.
+
+## Deployment
+
+Both workflows run on a published GitHub release. Nothing secret lives in the repo.
+
+### Backend (Linux VM)
+
+The backend needs a host with native IPv4 and IPv6 egress. It runs on a cloud VM with a public IPv4 and a GUA IPv6, named `mcdscheck-api.poggensee.it` in DNS.
+
+One-time setup on the VM:
+
+```bash
+sudo dnf -y install git && git clone https://github.com/poeggi/mc_dualstack_checker && sudo sh mc_dualstack_checker/deploy/bootstrap.sh
+```
+
+This installs the backend as a systemd service (user `mcdc`, port 8080), Caddy for TLS on 443 (Let's Encrypt), and the `mcdc-tick` timer. The cloud firewall and firewalld must allow TCP 443.
+
+`mcdc-tick` runs every 7 minutes and does two things: it pulls the latest GitHub release and installs it if the tag changed (outbound only, no deploy credentials), and it keeps the CPU busy for 30 s. Some free-tier clouds reclaim VMs whose CPU looks idle for days; the burst keeps the CPU busy at about 7 % average load.
+
+Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. `/healthz` reports the running version.
+
+The release workflow builds `linux/amd64` and `linux/arm64` binaries and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
+
+### Frontend (FTPS to the web host)
+
+Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
+Variables: `FTP_TARGET_DIR` (`./` when the FTP user is jailed at the target folder), `MC_PROVIDER` (`own` or `mcsrvstat`), `MC_BACKEND` (own backend URL), `LIVE_URL` (optional, verifies the upload).
+
+The workflow writes `MC_PROVIDER`, `MC_BACKEND` and the release tag as `MC_VERSION` into `frontend/config.php` before upload; the page shows it in the footer.
+
+### Release flow
+
+1. Merge to `main`, CI passes.
+2. Create a GitHub release with a tag like `v1.0.0`.
+3. The release workflow attaches the backend binaries; the frontend deploy uploads the page. Check the Actions tab.
+
+The frontend deploy runs in the `production` environment. Add a required reviewer there to get a manual approval step.

@@ -1,0 +1,2 @@
+# The web host runs PHP as CGI and refuses scripts (403) without this.
+Options +ExecCGI

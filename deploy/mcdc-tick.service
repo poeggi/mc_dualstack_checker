@@ -1,0 +1,7 @@
+[Unit]
+Description=mc_dualstack_check release pull and free-tier keep-alive
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mcdc-tick
+Nice=19

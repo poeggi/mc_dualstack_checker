@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - name: gofmt
+        working-directory: backend
+        run: test -z "$(gofmt -l .)"
+      - name: vet and build
+        working-directory: backend
+        run: |
+          go vet ./...
+          go build ./...
+      - name: smoke test
+        working-directory: backend
+        run: |
+          go run . &
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS 'localhost:8080/resolve?host=localhost' | grep -q '"a"'
+          curl -fsS 'localhost:8080/ping?ip=127.0.0.1&port=9&edition=java' | grep -q '"state":"offline"'
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check frontend/mc_dualstack_check.js
+      - run: node --check frontend/providers.js
+      - run: php -l frontend/api.php && php -l frontend/config.php
+      - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick
+      - name: ascii only
+        run: |
+          ! LC_ALL=C grep -rn '[^ -~	]' frontend/*.js frontend/*.html frontend/*.css frontend/*.php backend/*.go deploy/ README.md docs/

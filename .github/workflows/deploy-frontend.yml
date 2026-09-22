@@ -1,0 +1,62 @@
+name: Deploy frontend
+
+# Uploads frontend/ to the web host via FTPS on every published release.
+# lftp, not curl or basic-ftp: the host resets the data socket for those.
+# Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
+# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder)
+# Optional: MC_PROVIDER ("own" or "mcsrvstat"; empty = page says no backend is configured),
+# MC_BACKEND (own backend URL), LIVE_URL (post-deploy check)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Connect and list only, upload nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: write config.php
+        run: |
+          printf "<?php\ndefine('MC_PROVIDER', '%s');\ndefine('MC_BACKEND', '%s');\ndefine('MC_VERSION', '%s');\n" \
+            "${{ vars.MC_PROVIDER }}" "${{ vars.MC_BACKEND }}" "${{ github.event.release.tag_name || 'manual' }}" > frontend/config.php
+          cat frontend/config.php
+
+      - name: install lftp
+        # The runner image carries a Google Chrome apt source whose hash
+        # mismatch breaks apt-get update; lftp only needs Ubuntu's archive.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+      - name: mirror frontend/ to the FTP root
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          LFTP_PASSWORD: ${{ secrets.FTP_PASS }}
+          TARGET: ${{ vars.FTP_TARGET_DIR }}
+          DRY: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: |
+          lftp --env-password -u "$FTP_USER" "$FTP_HOST" -e "
+            set ssl:verify-certificate yes; set ftp:ssl-force true;
+            set ftp:ssl-protect-data true; set net:timeout 20; set net:max-retries 2;
+            set cmd:fail-exit on;
+            mirror -R --delete --verbose $DRY frontend/ ${TARGET:-./};
+            bye"
+
+      - name: verify live
+        if: ${{ !inputs.dry_run }}
+        run: |
+          test -n "${{ vars.LIVE_URL }}" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
+          curl -fsS "${{ vars.LIVE_URL }}api.php?op=config" | grep -F '"provider":"${{ vars.MC_PROVIDER }}"'

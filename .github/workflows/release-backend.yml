@@ -1,0 +1,39 @@
+name: Release backend
+
+# Builds the backend for both VM architectures and attaches the binaries
+# to the release. The VM pulls them itself (deploy/mcdc-tick), so no
+# deploy credentials exist anywhere.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: build
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p ../dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
+              -o "../dist/mc_dualstack_check_linux_$arch" .
+          done
+          (cd ../dist && sha256sum mc_dualstack_check_linux_* > SHA256SUMS && cat SHA256SUMS)
+
+      - name: attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
