@@ -49,7 +49,7 @@ One probe against one address and port: RakNet unconnected ping (UDP) for Bedroc
 
 | Field | Meaning |
 |---|---|
-| `state` | `online`, `offline`, or `no_route` (the checker host has no connectivity for this address family) |
+| `state` | `online`, `offline`, or `no_route` (the checker host itself has no connectivity for this address family; a router or firewall rejecting the probe is `offline`) |
 | `rtt_ms` | round trip of the probe, `online` only |
 | `error` | the socket or protocol error, `offline` and `no_route` only |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
@@ -65,7 +65,7 @@ Same shape as the site API's `resolve`, resolved on the backend host.
 
 ## Caching
 
-Probe results are cached for 60 seconds per `edition`, `ip` and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
+Probe results are cached per `edition`, `ip` and `port`: 60 seconds when online, 10 seconds when offline, so a lost packet does not look like an outage for a minute. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
 
 ## Limits
 

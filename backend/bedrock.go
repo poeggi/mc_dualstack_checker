@@ -20,8 +20,8 @@ var raknetMagic = []byte{0x00, 0xff, 0xff, 0x00, 0xfe, 0xfe, 0xfe, 0xfe, 0xfd, 0
 const (
 	raknetUnconnectedPing = 0x01
 	raknetUnconnectedPong = 0x1c
-	bedrockAttempts       = 2
-	bedrockReplyTimeout   = 2 * time.Second
+	bedrockAttempts       = 3
+	bedrockReplyTimeout   = 1500 * time.Millisecond
 )
 
 // pingBedrock sends a RakNet unconnected ping over the given network

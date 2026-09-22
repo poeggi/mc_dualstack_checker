@@ -367,7 +367,8 @@ function render(data) {
     queriedAt = data.queried_at;
     cacheExpiry = 0;
     [data.ipv4, data.ipv6].forEach(function (r) {
-        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + provider.cacheTTL - (r.age_s || 0));
+        var ttl = r.state === "online" ? provider.cacheTTL : provider.offlineTTL;
+        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + ttl - (r.age_s || 0));
     });
     updateTimeAgo();
 

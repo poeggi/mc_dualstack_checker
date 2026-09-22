@@ -64,21 +64,38 @@ func ping(ctx context.Context, edition string, ip net.IP, port int, hostLabel st
 	if isNoRoute(err) {
 		return PingResult{State: "no_route", Error: err.Error()}
 	}
-	return PingResult{State: "offline", Error: err.Error()}
+	return PingResult{State: "offline", Error: describe(err)}
 }
 
 // isNoRoute reports whether the error means the local host cannot use this
-// address family at all, as opposed to the remote server not answering.
+// address family at all, as opposed to the remote side not answering.
+// "no route to host" and "permission denied" are NOT local: Linux reports
+// them when a router or firewall on the way answers with ICMP unreachable.
 func isNoRoute(err error) bool {
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) {
 		return false
 	}
 	msg := strings.ToLower(opErr.Err.Error())
-	return strings.Contains(msg, "unreachable") ||
-		strings.Contains(msg, "no route") ||
+	return strings.Contains(msg, "network is unreachable") ||
 		strings.Contains(msg, "cannot assign requested address") ||
 		strings.Contains(msg, "address family not supported")
+}
+
+// describe turns the socket errors a rejecting router or firewall causes
+// into readable reasons; other errors pass through unchanged.
+func describe(err error) string {
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	switch {
+	case strings.Contains(low, "no route to host"):
+		return msg + " (rejected by a router or firewall, ICMP unreachable)"
+	case strings.Contains(low, "permission denied"):
+		return msg + " (rejected by a firewall, ICMP administratively prohibited)"
+	case strings.Contains(low, "connection refused"):
+		return msg + " (port closed)"
+	}
+	return msg
 }
 
 // stripFormatting removes Minecraft "section sign" colour codes.

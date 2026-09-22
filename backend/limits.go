@@ -14,6 +14,7 @@ import (
 
 const (
 	cacheTTL      = 60 * time.Second
+	offlineTTL    = 10 * time.Second // a lost packet must not look like an outage for a minute
 	cacheMax      = 10000
 	systemsWindow = 60 * time.Second
 	systemsMax    = 10
@@ -46,7 +47,7 @@ func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResu
 	if e := c.m[key]; e != nil {
 		select {
 		case <-e.ready:
-			if age := time.Since(e.at); age < cacheTTL {
+			if age := time.Since(e.at); age < ttlFor(e.res) {
 				c.mu.Unlock()
 				res := e.res
 				res.Cached, res.AgeS = true, int(age.Seconds())
@@ -80,11 +81,18 @@ func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResu
 	return res
 }
 
+func ttlFor(res PingResult) time.Duration {
+	if res.State == "online" {
+		return cacheTTL
+	}
+	return offlineTTL
+}
+
 func (c *probeCache) sweepLocked() {
 	for k, e := range c.m {
 		select {
 		case <-e.ready:
-			if time.Since(e.at) >= cacheTTL {
+			if time.Since(e.at) >= ttlFor(e.res) {
 				delete(c.m, k)
 			}
 		default:

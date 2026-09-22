@@ -36,7 +36,7 @@ The browser only ever talks to this site. `api.php` resolves names itself (PHP `
 
 ## API
 
-Documented in [docs/api.md](docs/api.md): the site API (`api.php`), the backend endpoints, the result shapes, the 60 s cache and the limits (more than 10 systems per minute per client starts a 60 s cooldown; 20 requests per client, refilled one per second; 64 probes in flight globally).
+Documented in [docs/api.md](docs/api.md): the site API (`api.php`), the backend endpoints, the result shapes, the cache (60 s online, 10 s offline) and the limits (more than 10 systems per minute per client starts a 60 s cooldown; 20 requests per client, refilled one per second; 64 probes in flight globally).
 
 Frontend behaviour: a literal IP skips DNS and omits the other family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, No DNS record, DNS error, Omitted, Unavailable (no route from the checker). A 429 from the API is shown as a countdown.
 
