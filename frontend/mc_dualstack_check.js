@@ -35,12 +35,12 @@ var cacheExpiry = 0; // epoch seconds until which a cached answer stays fresh, 0
 function timeAgo(ts) {
     var sec = Math.floor(Date.now() / 1000) - ts;
     if (sec < 5) return "just now";
-    if (sec < 60) return "> " + sec + "s ago";
+    if (sec < 60) return ">" + sec + "s ago";
     var min = Math.floor(sec / 60);
-    if (min < 60) return "> " + min + "m ago";
+    if (min < 60) return ">" + min + "m ago";
     var hr = Math.floor(min / 60);
-    if (hr < 24) return "> " + hr + "h ago";
-    return "> " + Math.floor(hr / 24) + "d ago";
+    if (hr < 24) return ">" + hr + "h ago";
+    return ">" + Math.floor(hr / 24) + "d ago";
 }
 function formatQueried(ts) {
     var now = new Date();
@@ -59,9 +59,9 @@ function formatQueried(ts) {
 function formatCacheExpiry(exp) {
     var sec = exp - Math.floor(Date.now() / 1000);
     if (sec <= 0) return "fresh now";
-    if (sec < 60) return "fresh in " + sec + "s";
+    if (sec < 60) return "can refresh in " + sec + "s";
     var min = Math.floor(sec / 60), s = sec % 60;
-    return "fresh in " + min + "m" + (s ? " " + s + "s" : "");
+    return "can refresh in " + min + "m" + (s ? " " + s + "s" : "");
 }
 function updateTimeAgo() {
     if (!queriedAt) return;
@@ -166,7 +166,7 @@ function checkFamily(family, ip, ports, edition, hostLabel, log) {
         result.ports_tried.push(port);
         return provider.ping(ip, port, edition, hostLabel).then(function (r) {
             if (r.state === "online") {
-                var how = (r.rtt_ms ? r.rtt_ms + " ms" : "") + (r.cached ? ", cached " + r.age_s + " s ago" : "");
+                var how = (r.rtt_ms ? r.rtt_ms + "ms" : "") + (r.cached ? ", cached " + r.age_s + "s ago" : "");
                 log.push("ONLINE: " + family + " responded on port " + port + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
                 result.state = "online"; result.port = port; result.info = r.info;
                 result.rtt_ms = r.rtt_ms; result.cached = r.cached; result.age_s = r.age_s;
@@ -330,7 +330,7 @@ function ipCard(r, label) {
     if (state === "online") {
         var info = r.info || {};
         rows.appendChild(row("Port", portList(r.ports_tried, r.port)));
-        if (r.rtt_ms) rows.appendChild(row("Latency", r.rtt_ms + " ms" + (r.cached ? ", cached " + r.age_s + " s ago" : "")));
+        if (r.rtt_ms) rows.appendChild(row("Latency", r.rtt_ms + "ms" + (r.cached ? ", cached " + r.age_s + "s ago" : "")));
         rows.appendChild(row("Players", info.players_online + " / " + info.players_max));
         if (info.motd) rows.appendChild(row("MOTD", info.motd));
         if (info.version) rows.appendChild(row("Version", info.version));

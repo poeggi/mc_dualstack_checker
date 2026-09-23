@@ -211,7 +211,8 @@ button.btn-active {
     font-family: var(--mono);
     font-size: 1rem;
     color: var(--label);
-    width: 90px;
+    width: 10ch;
+    white-space: nowrap;
     flex-shrink: 0;
     text-transform: uppercase;
     letter-spacing: .05em;
