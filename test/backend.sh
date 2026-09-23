@@ -10,8 +10,8 @@ set -u
 cd "$(dirname "$0")/../backend" || exit 1
 
 PORT=${PORT:-8089}
-B="http://localhost:$PORT"
-F="http://localhost:$((PORT + 1))"
+B="http://127.0.0.1:$PORT"
+F="http://127.0.0.1:$((PORT + 1))"
 PORT=$PORT FILTER_INTERNAL_TARGETS=false go run . >/dev/null 2>&1 &
 pid=$!
 PORT=$((PORT + 1)) go run . >/dev/null 2>&1 &
@@ -44,11 +44,16 @@ check "unknown endpoint -> 404"     is "$B/nope" 404
 check "unknown endpoint: JSON error" json "$B/nope" "d['error']"
 check "POST -> 405 with JSON"       sh -c "curl -s -X POST -w '%{http_code}' '$B/ping' | tr -d '\n' | grep -q '\"error\".*405\$'"
 
-echo "== name lookups"
-check "name resolved by the backend" json "$B/ping?host=localhost&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1' and d['state'] == 'offline'"
-check "name without family -> 400"  is "$B/ping?host=localhost&port=9" 400
+echo "== name lookups (localtest.me is public DNS for 127.0.0.1)"
+check "name resolved by the backend" json "$B/ping?host=localtest.me&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1' and d['state'] == 'offline'"
+check "trailing dot accepted"       json "$B/ping?host=LocalTest.me.&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1'"
+check "name without family -> 400"  is "$B/ping?host=localtest.me&port=9" 400
 check "neither ip nor host -> 400"  is "$B/ping?port=9" 400
-check "no record -> no_dns"         json "$B/ping?host=nonexistent.invalid&family=6&port=9" "d['state'] == 'no_dns'"
+check "invalid name -> 400"         is "$B/ping?host=bad_name.example.com&family=4&port=9" 400
+check "missing record -> no_dns"    json "$B/ping?host=does-not-exist-7f3a.poggensee.it&family=4&port=9" "d['state'] == 'no_dns'"
+check "single label, no lookup"     json "$B/ping?host=localhost&family=4&port=9" "d['state'] == 'no_dns'"
+check "local domain, no lookup"     json "$B/ping?host=printer.local&family=4&port=9" "d['state'] == 'no_dns'"
+check "internal domain, no lookup"  json "$B/ping?host=db.internal&family=6&port=9" "d['state'] == 'no_dns'"
 
 echo "== internal-address filter (default on)"
 for t in 127.0.0.1 10.1.2.3 100.64.0.1 169.254.169.254 172.16.0.1 192.168.1.1 0.0.0.1 \
@@ -56,7 +61,7 @@ for t in 127.0.0.1 10.1.2.3 100.64.0.1 169.254.169.254 172.16.0.1 192.168.1.1 0.
          ::ffff:127.0.0.1 64:ff9b::a00:1; do
     check "$t -> 400" is "$F/ping?ip=$t&port=9&edition=java" 400
 done
-check "name of an internal address -> 400" is "$F/ping?host=localhost&family=4&port=9&edition=java" 400
+check "name of an internal address -> no_dns" json "$F/ping?host=localtest.me&family=4&port=9&edition=java" "d['state'] == 'no_dns' and 'ip' not in d"
 check "public address passes"       is "$F/ping?ip=192.0.2.1&port=9&edition=java" 200
 
 echo "== cache"
@@ -77,6 +82,13 @@ check "health cooldown covers probes" is "$B/ping?ip=127.0.0.1&port=9&edition=ja
 check "429 names the health limit"  json "$B/health" "'health' in d['error']"
 CLIENT=203.0.113.9
 check "other client unaffected"     is "$B/health" 200
+CLIENT=2001:db8:1:2::1
+for i in 1 2 3; do status "$B/health" >/dev/null; done
+CLIENT=2001:db8:1:2::ffff
+check "IPv6 /64 shares limits: 4th ok" is "$B/health" 200
+check "IPv6 /64 shares limits: 5th -> 429" is "$B/health" 429
+CLIENT=2001:db8:1:3::1
+check "next /64 unaffected"         is "$B/health" 200
 unset CLIENT
 
 echo

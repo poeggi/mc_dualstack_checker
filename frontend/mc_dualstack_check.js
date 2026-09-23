@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 
-// The provider (see providers.js) is chosen server-side and read once at
-// startup. null = no backend configured, checks disabled.
-var provider = null;
+// Whether the relay has a backend configured, read once at startup.
+var backendReady = false;
+// Seconds the backend caches a probe result.
+var CACHE_TTL = 60;
 // Default ports per edition. Bedrock servers commonly listen on 19133 for
 // IPv6, so that is the IPv6 default and the first IPv6 fallback.
 var EDITIONS = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } };
@@ -138,8 +139,26 @@ function fillForm(q) {
     port6El.placeholder = q.port4 || "as IPv4";
 }
 
+// -- Relay -------------------------------------------------------
+// Every call goes to api/<endpoint> on this host, which relays it to the
+// backend. Errors are thrown as { rateLimited, retry } | { unreachable } |
+// { message }.
+function api(endpoint, params) {
+    var q = new URLSearchParams(params || {}).toString();
+    return fetch("api/" + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
+        function (res) {
+            return res.json().catch(function () { return {}; }).then(function (body) {
+                if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
+                if (!res.ok) throw { message: body.error || ("Request failed (" + res.status + ")") };
+                return body;
+            });
+        },
+        function () { throw { unreachable: true }; }
+    );
+}
+
 // -- Check orchestration -----------------------------------------
-// The provider only resolves names and runs single probes. Everything
+// The backend only resolves names and runs single probes. Everything
 // else (literal IP handling, fallback order, per-family independence,
 // the log) happens here.
 var retryTimer = null;
@@ -152,9 +171,12 @@ function literalIP(host) {
     return null;
 }
 
-// Probes one family on the given ports in order and stops at the first answer.
-function checkFamily(family, ip, ports, edition, hostLabel, log) {
-    var result = { state: "offline", ip: ip, ports_tried: [] };
+// Probes one family on the given ports in order and stops at the first
+// answer. For a host name the first probe also resolves it on the backend;
+// later ports reuse the address it returned.
+function checkFamily(fam, target, ports, edition, log) {
+    var family = "IPv" + fam, record = fam === 4 ? "A" : "AAAA";
+    var result = { state: "offline", ip: target.ip || "", ports_tried: [] };
     function tryPort(i) {
         if (i >= ports.length) {
             log.push("OFFLINE: " + family + " did not respond on any port");
@@ -162,9 +184,24 @@ function checkFamily(family, ip, ports, edition, hostLabel, log) {
         }
         var port = ports[i];
         if (i > 0) log.push("Port " + ports[i - 1] + " failed, retrying port " + port);
-        log.push("Checking " + family + ": " + ip + " port " + port);
-        result.ports_tried.push(port);
-        return provider.ping(ip, port, edition, hostLabel).then(function (r) {
+        log.push("Checking " + family + ": " + (result.ip || target.host) + " port " + port);
+        var params = { port: port, edition: edition };
+        if (result.ip) params.ip = result.ip; else params.family = fam;
+        if (target.host) params.host = target.host;
+        return api("ping", params).then(function (r) {
+            if (r.state === "no_dns") {
+                log.push("Resolved " + family + ": no " + record + " record");
+                return { state: "no_dns", reason: "No " + record + " record found" };
+            }
+            if (r.state === "dns_error") {
+                log.push("ERROR: " + family + " lookup failed: " + (r.error || "unknown"));
+                return { state: "dns_error", reason: record + " lookup failed" };
+            }
+            if (!result.ip && r.ip) {
+                result.ip = r.ip;
+                log.push("Resolved " + family + ": " + r.ip);
+            }
+            result.ports_tried.push(port);
             if (r.state === "online") {
                 var how = (r.rtt_ms ? r.rtt_ms + "ms" : "") + (r.cached ? ", cached " + r.age_s + "s ago" : "");
                 log.push("ONLINE: " + family + " responded on port " + port + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
@@ -192,7 +229,7 @@ function runCheck(q) {
     showNotice("");
     $("results").hidden = true;
     document.title = q.host + " - Minecraft Server Dualstack Checker";
-    if (!provider) {
+    if (!backendReady) {
         showNotice("No checker backend is configured yet. The check cannot run.");
         return;
     }
@@ -213,47 +250,21 @@ function runCheck(q) {
     var startedAt = Math.floor(Date.now() / 1000);
     var log = [], log4 = [], log6 = [];
     var literal = literalIP(q.host);
-    var hostLabel = literal ? "" : q.host;
+    var target = literal ? { ip: literal.ip } : { host: q.host };
+    var probe = function (fam, ports, famLog) {
+        if (!literal || literal.family === fam) return checkFamily(fam, target, ports, edition, famLog);
+        return { state: "omitted", reason: "Input is a literal IPv" + literal.family + " address" };
+    };
+    if (literal) log.push("Input is a literal IPv" + literal.family + " address, skipping DNS");
 
-    var dns;
-    if (literal) {
-        log.push("Input is a literal IPv" + literal.family + " address, skipping DNS");
-        dns = Promise.resolve(literal.family === 4 ? { a: [literal.ip], aaaa: [] } : { a: [], aaaa: [literal.ip] });
-    } else {
-        dns = provider.resolve(q.host).then(function (r) {
-            var errs = r.errors || {};
-            var dnsLine = function (family, record, ips, err) {
-                if (ips[0]) return "Resolved " + family + ": " + ips[0];
-                if (err) return "ERROR: " + family + " lookup failed: " + err;
-                return "Resolved " + family + ": no " + record + " record";
-            };
-            log.push(dnsLine("IPv4", "A", r.a, errs.a));
-            log.push(dnsLine("IPv6", "AAAA", r.aaaa, errs.aaaa));
-            return r;
-        });
-    }
-
-    dns.then(function (r) {
-        var ip4 = r.a[0], ip6 = r.aaaa[0];
-        var errs = r.errors || {};
-        var skip = function (family) {
-            var record = family === 4 ? "A" : "AAAA";
-            if (literal) return { state: "omitted", reason: "Input is a literal IPv" + literal.family + " address" };
-            if (errs[record.toLowerCase()]) return { state: "dns_error", reason: record + " lookup failed" };
-            return { state: "no_dns", reason: "No " + record + " record found" };
-        };
-        return Promise.all([
-            ip4 ? checkFamily("IPv4", ip4, ports4, edition, hostLabel, log4) : skip(4),
-            ip6 ? checkFamily("IPv6", ip6, ports6, edition, hostLabel, log6) : skip(6)
-        ]);
-    }).then(function (both) {
+    Promise.all([probe(4, ports4, log4), probe(6, ports6, log6)]).then(function (both) {
         setBusy(false);
         render({ queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) });
     }).catch(function (err) {
         if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
         setBusy(false);
         if (err && err.unreachable) {
-            showNotice("Cannot reach " + provider.label + ". Try again shortly.");
+            showNotice("Cannot reach the checker backend. Try again shortly.");
         } else {
             showNotice(err && err.message ? err.message : "Check failed.");
         }
@@ -368,7 +379,7 @@ function render(data) {
     queriedAt = data.queried_at;
     cacheExpiry = 0;
     [data.ipv4, data.ipv6].forEach(function (r) {
-        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + provider.cacheTTL - (r.age_s || 0));
+        if (r.cached) cacheExpiry = Math.max(cacheExpiry, queriedAt + CACHE_TTL - (r.age_s || 0));
     });
     updateTimeAgo();
 
@@ -412,8 +423,8 @@ function loadFromURL() {
 }
 window.addEventListener("popstate", loadFromURL);
 
-// Say up front when results deserve a caveat: a third-party provider, or
-// a backend without IPv6 that cannot judge IPv6 reachability.
+// Say up front when the backend has no IPv6 and cannot judge IPv6
+// reachability.
 function backendNotice(msg) {
     var n = $("notice-backend");
     n.textContent = "\u26A0 " + msg;
@@ -421,15 +432,14 @@ function backendNotice(msg) {
 }
 
 api("config").then(function (cfg) {
-    provider = PROVIDERS[cfg.provider] || null;
+    backendReady = !!cfg.backend;
     if (cfg.version) $("version").textContent = cfg.version;
 }, function () {
-    provider = null;
+    backendReady = false;
 }).then(function () {
     loadFromURL();
-    if (!provider) return;
-    if (provider.notice) backendNotice(provider.notice);
-    provider.health().then(function (h) {
+    if (!backendReady) return;
+    api("health").then(function (h) {
         if (h.version) $("version").textContent += ", API " + h.version;
         if (h.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
     }).catch(function () {});

@@ -25,7 +25,7 @@ const (
 	rlRefill      = time.Second
 	clientIdle    = 10 * time.Minute
 	healthMax     = 4
-	maxInFlight   = 64
+	maxInFlight   = 128
 )
 
 // -- result cache ------------------------------------------------

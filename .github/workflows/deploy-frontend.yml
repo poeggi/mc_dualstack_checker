@@ -4,8 +4,8 @@ name: Deploy frontend
 # lftp, not curl or basic-ftp: the host resets the data socket for those.
 # Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
 # Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder)
-# Optional: MC_PROVIDER ("own" or "mcsrvstat"; empty = page says no backend is configured),
-# MC_BACKEND (own backend URL), LIVE_URL (post-deploy check)
+# Optional: MC_BACKEND (backend URL; empty = page says no backend is configured),
+# LIVE_URL (post-deploy check)
 
 on:
   release:
@@ -28,9 +28,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: write config.php
+        # Both values end up inside PHP string literals.
+        env:
+          MC_BACKEND: ${{ vars.MC_BACKEND }}
+          VERSION: ${{ github.event.release.tag_name || 'manual' }}
         run: |
-          printf "<?php\ndefine('MC_PROVIDER', '%s');\ndefine('MC_BACKEND', '%s');\ndefine('MC_VERSION', '%s');\n" \
-            "${{ vars.MC_PROVIDER }}" "${{ vars.MC_BACKEND }}" "${{ github.event.release.tag_name || 'manual' }}" > frontend/config.php
+          for v in "$MC_BACKEND" "$VERSION"; do
+            case "$v" in *"'"*|*\\*) echo "quote or backslash in a config value" >&2; exit 1 ;; esac
+          done
+          printf "<?php\ndefine('MC_BACKEND', '%s');\ndefine('MC_VERSION', '%s');\n" \
+            "$MC_BACKEND" "$VERSION" > frontend/config.php
           cat frontend/config.php
 
       - name: install lftp
@@ -57,6 +64,9 @@ jobs:
 
       - name: verify live
         if: ${{ !inputs.dry_run }}
+        env:
+          LIVE_URL: ${{ vars.LIVE_URL }}
+          VERSION: ${{ github.event.release.tag_name || 'manual' }}
         run: |
-          test -n "${{ vars.LIVE_URL }}" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
-          curl -fsS "${{ vars.LIVE_URL }}api/config" | grep -F '"provider":"${{ vars.MC_PROVIDER }}"'
+          test -n "$LIVE_URL" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
+          curl -fsS "${LIVE_URL}api/config" | grep -F "\"version\":\"$VERSION\""

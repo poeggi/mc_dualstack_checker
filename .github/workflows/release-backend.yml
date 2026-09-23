@@ -1,8 +1,9 @@
 name: Release backend
 
-# Builds the backend for both VM architectures and attaches the binaries
-# to the release. The VM pulls them itself (deploy/mcdc-tick), so no
-# deploy credentials exist anywhere.
+# Builds the backend for both VM architectures and attaches the binaries,
+# the VM's deploy files (deploy.tar.gz) and their SHA256SUMS to the
+# release. The VM pulls them itself (deploy/mcdc-tick), so no deploy
+# credentials exist anywhere. SHA256SUMS goes up last: the VM acts on it.
 
 on:
   release:
@@ -24,16 +25,24 @@ jobs:
         working-directory: backend
         env:
           CGO_ENABLED: "0"
+          TAG: ${{ github.event.release.tag_name }}
         run: |
+          case "$TAG" in v[0-9]*) ;; *) echo "tag must start with v and a digit" >&2; exit 1 ;; esac
+          case "$TAG" in *[!A-Za-z0-9._+-]*) echo "unexpected character in tag" >&2; exit 1 ;; esac
           mkdir -p ../dist
           for arch in amd64 arm64; do
             GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
+              -ldflags "-s -w -X main.version=$TAG" \
               -o "../dist/mc_dualstack_check_linux_$arch" .
           done
-          (cd ../dist && sha256sum mc_dualstack_check_linux_* > SHA256SUMS && cat SHA256SUMS)
+          tar -czf ../dist/deploy.tar.gz -C ../deploy \
+            Caddyfile mcdc-tick mc-dualstack-check.service mcdc-tick.service mcdc-tick.timer caddy.service www
+          (cd ../dist && sha256sum mc_dualstack_check_linux_* deploy.tar.gz > SHA256SUMS && cat SHA256SUMS)
 
       - name: attach to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" dist/mc_dualstack_check_linux_* dist/deploy.tar.gz --clobber
+          gh release upload "$TAG" dist/SHA256SUMS --clobber

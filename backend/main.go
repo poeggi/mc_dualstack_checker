@@ -9,6 +9,7 @@
 //	GET /ping?host=<name>&family=4|6&port=<n>&edition=... -> the same, resolved here
 //	GET /health
 //
+// Listens on loopback only; Caddy in front is the public side.
 // Environment: PORT, ALLOWED_ORIGINS, FILTER_INTERNAL_TARGETS (default true).
 package main
 
@@ -19,6 +20,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -68,35 +70,103 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              ":" + port,
+		Addr:              "127.0.0.1:" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      pingTimeout + 2*time.Second,
 	}
-	log.Printf("%s listening on :%s (ipv6 egress: %v, internal targets filtered: %v)",
-		version, port, ipv6Egress.Load(), filterInternal)
+	log.Printf("%s listening on %s (ipv6 egress: %v, internal targets filtered: %v)",
+		version, srv.Addr, ipv6Egress.Load(), filterInternal)
 	log.Fatal(srv.ListenAndServe())
 }
 
-// validHost reports whether host can be a DNS name.
-func validHost(host string) bool {
-	return host != "" && len(host) <= maxHostLen && !strings.ContainsAny(host, " /\\@#?:[]")
+// hostName returns host as a lowercase DNS name without a trailing dot, or
+// "" unless it consists of letters, digits and hyphens in labels of at most
+// 63 characters.
+func hostName(host string) string {
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	if name == "" || len(name) > maxHostLen {
+		return ""
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 {
+			return ""
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return ""
+			}
+		}
+	}
+	return name
 }
 
-// resolveFamily returns the first address of host in family ("4" or "6"),
-// nil when host has no record there.
-func resolveFamily(ctx context.Context, host, family string) (net.IP, error) {
+// localDomains only resolve inside private networks: reserved and
+// customary private names, plus the checker host's own search domains.
+var localDomains = append([]string{
+	"localhost", "local", "internal", "lan", "home", "corp", "localdomain",
+	"intranet", "private", "arpa", "test", "example", "invalid",
+}, searchDomains()...)
+
+// searchDomains reads the search and domain lines of /etc/resolv.conf.
+func searchDomains() []string {
+	b, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) > 1 && (f[0] == "search" || f[0] == "domain") {
+			for _, d := range f[1:] {
+				if d = strings.ToLower(strings.Trim(d, ".")); d != "" {
+					out = append(out, d)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// localName reports whether name can only be internal: a single label, or
+// a name in localDomains. Such names are never looked up.
+func localName(name string) bool {
+	if !strings.Contains(name, ".") {
+		return true
+	}
+	for _, d := range localDomains {
+		if name == d || strings.HasSuffix(name, "."+d) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveFamily returns the first public address of name in family ("4" or
+// "6"), nil when there is none. The name is looked up as absolute, so the
+// host's search domains are never appended. Local names, and names that
+// point only to internal addresses, come back nil like missing records,
+// so answers reveal nothing about internal names.
+func resolveFamily(ctx context.Context, name, family string) (net.IP, error) {
+	if localName(name) {
+		return nil, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip"+family, host)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip"+family, name+".")
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 		return nil, nil
 	}
-	if err != nil || len(ips) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	return ips[0], nil
+	for _, ip := range ips {
+		if !filterInternal || !internalTarget(ip) {
+			return ip, nil
+		}
+	}
+	return nil, nil
 }
 
 func lookupReason(err error) string {
@@ -122,7 +192,8 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "port must be between 1 and 65535")
 		return
 	}
-	hostLabel := strings.TrimSpace(q.Get("host"))
+	// With ip, an invalid host is dropped; without, it is an error.
+	host := hostName(strings.TrimSpace(q.Get("host")))
 	var ip net.IP
 	family := ""
 	if raw := q.Get("ip"); raw != "" {
@@ -134,11 +205,8 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusBadRequest, "target address is not public")
 			return
 		}
-		if len(hostLabel) > maxHostLen {
-			hostLabel = ""
-		}
 	} else {
-		if !validHost(hostLabel) {
+		if host == "" {
 			httpError(w, http.StatusBadRequest, "ip or host is missing or invalid")
 			return
 		}
@@ -149,25 +217,22 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 	// The system a client is charged for: the name it asked about, or the
 	// literal address. Both families and all port fallbacks count once.
-	system := hostLabel
+	system := host
 	if system == "" {
 		system = ip.String()
 	}
-	if wait, reason := limits.admitProbe(clientIP(r), system); limited(w, wait, reason) {
+	if wait, reason := limits.admitProbe(clientKey(r), system); limited(w, wait, reason) {
 		return
 	}
 
 	if ip == nil {
-		ip, err = resolveFamily(r.Context(), hostLabel, family)
+		ip, err = resolveFamily(r.Context(), host, family)
 		switch {
 		case err != nil:
 			writeJSON(w, PingResult{State: "dns_error", Error: lookupReason(err)})
 			return
 		case ip == nil:
 			writeJSON(w, PingResult{State: "no_dns"})
-			return
-		case filterInternal && internalTarget(ip):
-			httpError(w, http.StatusBadRequest, "target address is not public")
 			return
 		}
 	}
@@ -180,7 +245,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 			return PingResult{State: "busy"}, false
 		}
 		defer releaseProbe()
-		return ping(ctx, edition, ip, port, hostLabel), true
+		return ping(ctx, edition, ip, port, host), true
 	})
 	if res.State == "busy" {
 		w.Header().Set("Retry-After", "5")
@@ -208,7 +273,7 @@ func limited(w http.ResponseWriter, wait int, reason string) bool {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	if wait, reason := limits.admitHealth(clientIP(r)); limited(w, wait, reason) {
+	if wait, reason := limits.admitHealth(clientKey(r)); limited(w, wait, reason) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "version": version, "ipv6": ipv6Egress.Load()})
@@ -216,12 +281,14 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(v)
 }
 
 func httpError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
@@ -276,16 +343,24 @@ func originAllowed(allowed []string, origin string) bool {
 	return false
 }
 
-// clientIP is the first X-Forwarded-For entry. The relay on the web host
-// sets it, and Caddy only accepts forwarded headers from that host, so
-// the chain is trusted end to end. Without the header: the peer address.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+// clientKey is the address a client is charged for: the first
+// X-Forwarded-For entry, or the peer address when that is no address. The
+// relay on the web host sets the header, and Caddy only accepts forwarded
+// headers from that host, so the chain is trusted end to end. IPv6 clients
+// are keyed by their /64, since one host usually holds a whole /64.
+func clientKey(r *http.Request) string {
+	a, err := netip.ParseAddr(strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-For"), ",", 2)[0]))
 	if err != nil {
-		return r.RemoteAddr
+		ap, err := netip.ParseAddrPort(r.RemoteAddr)
+		if err != nil {
+			return r.RemoteAddr
+		}
+		a = ap.Addr()
 	}
-	return host
+	a = a.Unmap().WithZone("")
+	if a.Is6() {
+		p, _ := a.Prefix(64)
+		return p.String()
+	}
+	return a.String()
 }

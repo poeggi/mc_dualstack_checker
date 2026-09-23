@@ -19,7 +19,16 @@ With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `
 
 `host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
-Internal addresses answer `400`, given as `ip` or resolved from `host`: loopback, unspecified, link-local, RFC 1918, shared (`100.64.0.0/10`), unique local (`fc00::/7`), site-local, multicast and reserved ranges. IPv4-mapped and NAT64 forms of those count as well.
+`host` must be a DNS name of letters, digits and hyphens, labels of at most 63 characters, 253 in total; a trailing dot is allowed. Otherwise the request answers `400`, or with `ip` the name is ignored.
+
+Internal addresses in `ip` answer `400`: loopback, unspecified, link-local, RFC 1918, shared (`100.64.0.0/10`), unique local (`fc00::/7`), site-local, multicast and reserved ranges. IPv4-mapped and NAT64 forms of those count as well.
+
+Name lookups reveal nothing internal. These answer `no_dns`, exactly like a name without a record:
+
+- Names that are never looked up: single labels, `localhost`, and names under `.local`, `.internal`, `.lan`, `.home`, `.corp`, `.localdomain`, `.intranet`, `.private`, `.arpa`, `.test`, `.example`, `.invalid` or the checker host's own DNS search domains.
+- Names whose records in `family` are all internal addresses.
+
+Names are looked up as absolute names, so the checker host's search domains are never appended.
 
 ```json
 {
@@ -71,7 +80,7 @@ Probe results are cached for 60 seconds per `edition`, address and `port`, onlin
 
 ## Limits
 
-Per client address. Direct callers are charged for their own address, the web interface for the address its host forwards.
+Per client address: an IPv4 address, or the /64 of an IPv6 address. Direct callers are charged for their own address, the web interface for the address its host forwards.
 
 - **Distinct systems.** More than 10 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
 - **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.
@@ -79,8 +88,8 @@ Per client address. Direct callers are charged for their own address, the web in
 
 During a cooldown every request answers `429` with `Retry-After`.
 
-Global: at most 64 probes in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
+Global: at most 128 probes in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
 
 ## Running your own
 
-The backend reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses, for tests against local servers.
+The backend listens on `127.0.0.1` only; put a reverse proxy in front of it. It reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses and internal answers of name lookups, for tests against local servers.

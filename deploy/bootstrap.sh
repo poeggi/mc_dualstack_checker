@@ -1,51 +1,64 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# One-time VM setup for the backend on a Linux VM.
+# One-time setup of the backend host: any Linux with systemd.
 # Run as root from a checkout of the repo:  sudo sh deploy/bootstrap.sh
-# Idempotent: rerunning updates the unit files and Caddy config.
+# Afterwards mcdc-tick keeps Caddy, the backend and the files of deploy/
+# current from the GitHub releases. Idempotent.
 set -eu
 
-CADDY_VERSION="2.11.4"
 HERE=$(cd "$(dirname "$0")" && pwd)
 
-case "$(uname -m)" in
-    x86_64)  ARCH=amd64 ;;
-    aarch64) ARCH=arm64 ;;
-    *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
-esac
+echo "== tools"
+missing=
+for c in curl tar cmp sha256sum sha512sum install timeout; do
+    command -v "$c" >/dev/null 2>&1 || missing="$missing $c"
+done
+if [ -n "$missing" ]; then
+    echo "missing:$missing"
+    pkgs="curl tar diffutils coreutils"
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y -qq $pkgs
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf -y -q install $pkgs
+    elif command -v yum >/dev/null 2>&1; then
+        yum -y -q install $pkgs
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper -n -q install $pkgs
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm --needed $pkgs
+    else
+        echo "no known package manager; install:$missing" >&2
+        exit 1
+    fi
+fi
 
-echo "== packages and firewall"
-dnf -y -q install firewalld tar curl
-systemctl enable --now firewalld
-firewall-cmd -q --permanent --add-service=http
-firewall-cmd -q --permanent --add-service=https
-firewall-cmd -q --reload
+echo "== firewall"
+if systemctl is-active -q firewalld 2>/dev/null; then
+    firewall-cmd -q --permanent --add-service=http
+    firewall-cmd -q --permanent --add-service=https
+    firewall-cmd -q --reload
+elif command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 80/tcp >/dev/null
+    ufw allow 443/tcp >/dev/null
+else
+    echo "no firewalld or ufw active; make sure TCP 80 and 443 are open"
+fi
 
 echo "== users"
-id mcdc  >/dev/null 2>&1 || useradd --system --no-create-home --shell /sbin/nologin mcdc
-id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell /sbin/nologin caddy
+nologin=$(command -v nologin || echo /bin/false)
+id mcdc  >/dev/null 2>&1 || useradd --system --no-create-home --shell "$nologin" mcdc
+id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell "$nologin" caddy
 
-echo "== caddy $CADDY_VERSION"
-if [ "$(/usr/local/bin/caddy version 2>/dev/null | cut -d' ' -f1)" != "v$CADDY_VERSION" ]; then
-    tmp=$(mktemp -d)
-    curl -fsSL -o "$tmp/caddy.tar.gz" \
-        "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION/caddy_${CADDY_VERSION}_linux_$ARCH.tar.gz"
-    tar -xzf "$tmp/caddy.tar.gz" -C "$tmp" caddy
-    install -m 755 "$tmp/caddy" /usr/local/bin/caddy
-    rm -rf "$tmp"
-fi
-mkdir -p /etc/caddy /var/www/mcdc
+echo "== deploy files"
+mkdir -p /etc/caddy /var/www/mcdc /var/lib/mcdc
 install -m 644 "$HERE/Caddyfile" /etc/caddy/Caddyfile
 install -m 644 "$HERE/www/"* /var/www/mcdc/
-chown -R caddy:caddy /var/lib/caddy
-
-echo "== backend units"
 install -m 755 "$HERE/mcdc-tick" /usr/local/bin/mcdc-tick
 install -m 644 "$HERE/mc-dualstack-check.service" "$HERE/mcdc-tick.service" "$HERE/mcdc-tick.timer" "$HERE/caddy.service" /etc/systemd/system/
-mkdir -p /var/lib/mcdc
+chown -R caddy:caddy /var/lib/caddy
 systemctl daemon-reload
 
-echo "== first release pull"
+echo "== first tick: Caddy and the latest release"
 BUSY_SECONDS=0 /usr/local/bin/mcdc-tick
 
 systemctl enable --now mc-dualstack-check caddy mcdc-tick.timer

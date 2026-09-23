@@ -32,7 +32,6 @@ jobs:
         with:
           node-version: 22
       - run: node --check frontend/mc_dualstack_check.js
-      - run: node --check frontend/providers.js
       - run: php -l frontend/api.php && php -l frontend/config.php
       - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh
       - name: ascii only

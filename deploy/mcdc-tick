@@ -1,17 +1,24 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Runs every 7 minutes from mcdc-tick.timer. Two jobs:
-#   1. Pull the latest GitHub release of the backend and install it if new.
-#      Outbound only: no deploy key, nothing connects into the VM.
-#   2. Keep the CPU busy for 30 s. Some free-tier clouds reclaim VMs
-#      whose CPU looks idle for days; this keeps the CPU busy at ~7 %
-#      average load.
+# Runs every 7 minutes from mcdc-tick.timer, as root. Three jobs:
+#   1. Keep Caddy at CADDY_VERSION.
+#   2. Install the latest GitHub release whenever its SHA256SUMS changes,
+#      so a release published again under the same tag counts as well: the
+#      backend binary, and from deploy.tar.gz the Caddy config, the landing
+#      page, the systemd units and this script. Outbound only: no deploy
+#      key, nothing connects into the VM.
+#   3. Keep the CPU busy for BUSY_SECONDS (default 30 s, about 7 % average
+#      load). Some free-tier clouds reclaim VMs whose CPU looks idle for
+#      days; BUSY_SECONDS=0 in the unit's environment turns this off.
 set -eu
 
 REPO="poeggi/mc_dualstack_checker"
+CADDY_VERSION="2.11.4"
 BIN="/usr/local/bin/mc_dualstack_check"
-STATE="/var/lib/mcdc/version"
+CADDY="/usr/local/bin/caddy"
+STATE="/var/lib/mcdc"
 PAGE="/var/www/mcdc/index.html"
+UNITS="mc-dualstack-check.service mcdc-tick.service mcdc-tick.timer caddy.service"
 BUSY_SECONDS=${BUSY_SECONDS:-30}
 
 case "$(uname -m)" in
@@ -20,35 +27,100 @@ case "$(uname -m)" in
     *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
 
-update() {
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# The functions run in "||" lists, where set -e does not apply, so every
+# step that must not fail carries its own "|| return 1".
+
+# put <src> <dst> <mode>: installs src by rename, so a running copy of dst
+# (this script, the backend binary) stays intact.
+put() {
+    install -m "$3" "$1" "$2.new" && mv -f "$2.new" "$2"
+}
+
+caddy_update() {
+    [ "$("$CADDY" version 2>/dev/null | cut -d' ' -f1)" != "v$CADDY_VERSION" ] || return 0
+    name="caddy_${CADDY_VERSION}_linux_$ARCH.tar.gz"
+    base="https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION"
+    mkdir -p "$tmp/caddy" || return 1
+    curl -fsSL -o "$tmp/caddy/$name" "$base/$name" || return 1
+    curl -fsSL -o "$tmp/caddy/sums" "$base/caddy_${CADDY_VERSION}_checksums.txt" || return 1
+    (cd "$tmp/caddy" && grep " $name\$" sums | sha512sum -c --quiet --strict) || return 1
+    tar -xzf "$tmp/caddy/$name" -C "$tmp/caddy" caddy || return 1
+    put "$tmp/caddy/caddy" "$CADDY" 755 || return 1
+    systemctl try-restart caddy
+    echo "installed caddy v$CADDY_VERSION"
+}
+
+# sync_deploy <dir>: installs the deploy files of a release. Caddy reloads
+# when its config changed and restarts when its unit did.
+sync_deploy() {
+    d=$1
+    "$CADDY" adapt --config "$d/Caddyfile" >/dev/null 2>&1 || { echo "release Caddyfile invalid" >&2; return 1; }
+    units=
+    for u in $UNITS; do
+        cmp -s "$d/$u" "/etc/systemd/system/$u" && continue
+        put "$d/$u" "/etc/systemd/system/$u" 644 || return 1
+        units="$units $u"
+    done
+    caddyfile=
+    if ! cmp -s "$d/Caddyfile" /etc/caddy/Caddyfile; then
+        put "$d/Caddyfile" /etc/caddy/Caddyfile 644 || return 1
+        caddyfile=1
+    fi
+    for f in "$d"/www/*; do
+        put "$f" "/var/www/mcdc/${f##*/}" 644 || return 1
+    done
+    put "$d/mcdc-tick" /usr/local/bin/mcdc-tick 755 || return 1
+
+    [ -z "$units" ] || systemctl daemon-reload
+    case "$units" in
+        *caddy.service*) systemctl try-restart caddy ;;
+        *) [ -z "$caddyfile" ] || systemctl try-reload-or-restart caddy ;;
+    esac
+    case "$units" in
+        *mcdc-tick.timer*) systemctl restart mcdc-tick.timer ;;
+    esac
+}
+
+release_update() {
     latest=$(curl -fsS "https://api.github.com/repos/$REPO/releases/latest" \
         | sed -n 's/^ *"tag_name": *"\([^"]*\)".*/\1/p')
     [ -n "$latest" ] || { echo "no release found" >&2; return 0; }
-    [ "$latest" != "$(cat "$STATE" 2>/dev/null)" ] || return 0
-
-    tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
+    # The tag goes into URLs, a file and a sed expression.
+    case "$latest" in *[!A-Za-z0-9._+-]*) echo "unexpected release tag" >&2; return 1 ;; esac
     base="https://github.com/$REPO/releases/download/$latest"
-    asset="mc_dualstack_check_linux_$ARCH"
-    curl -fsSL -o "$tmp/$asset" "$base/$asset"
-    curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
-    (cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet)
+    r="$tmp/release"
+    mkdir -p "$r" || return 1
+    curl -fsSL -o "$r/SHA256SUMS" "$base/SHA256SUMS" || return 1
+    cmp -s "$r/SHA256SUMS" "$STATE/SHA256SUMS" && return 0
 
-    install -m 755 "$tmp/$asset" "$BIN"
-    mkdir -p "$(dirname "$STATE")"
-    echo "$latest" > "$STATE"
+    asset="mc_dualstack_check_linux_$ARCH"
+    curl -fsSL -o "$r/$asset" "$base/$asset" || return 1
+    curl -fsSL -o "$r/deploy.tar.gz" "$base/deploy.tar.gz" || return 1
+    (cd "$r" && grep -E " ($asset|deploy\.tar\.gz)\$" SHA256SUMS > want &&
+        [ "$(wc -l < want)" -eq 2 ] && sha256sum -c --quiet --strict want) || return 1
+    mkdir -p "$r/deploy" && tar -xzf "$r/deploy.tar.gz" -C "$r/deploy" || return 1
+
+    sync_deploy "$r/deploy" || return 1
+    put "$r/$asset" "$BIN" 755 || return 1
+    mkdir -p "$STATE"
+    echo "$latest" > "$STATE/version"
+    cp "$r/SHA256SUMS" "$STATE/SHA256SUMS"
     systemctl restart mc-dualstack-check
     echo "installed $latest"
 }
 
 # The landing page is static; stamp the installed version into it.
 stamp() {
-    ver=$(cat "$STATE" 2>/dev/null || echo dev)
+    ver=$(cat "$STATE/version" 2>/dev/null || echo dev)
     grep -q "id=\"api-version\">$ver<" "$PAGE" 2>/dev/null && return 0
     sed -i "s|\(id=\"api-version\">\)[^<]*|\1$ver|" "$PAGE"
 }
 
-update || echo "update failed, keeping current version" >&2
+caddy_update || echo "caddy update failed, keeping the current one" >&2
+release_update || echo "update failed, keeping current version" >&2
 stamp || true
 
 [ "$BUSY_SECONDS" -gt 0 ] && { timeout "$BUSY_SECONDS" sh -c 'while :; do :; done' || true; }

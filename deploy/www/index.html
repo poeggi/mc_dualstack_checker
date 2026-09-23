@@ -39,7 +39,7 @@ GET /ping?host=&lt;name&gt;&amp;family=4|6&amp;port=&lt;n&gt;&amp;edition=bedroc
 GET /health</pre>
     <pre>curl "https://mcdscheck-api.poggensee.it/ping?ip=2001:db8::1&amp;port=19132&amp;edition=bedrock"</pre>
     <footer>
-        Limits per client: 10 systems per minute, 4 health requests per 7 s, then a 60 s cooldown (429).<br>
+        Limits per IPv4 address or IPv6 /64: 10 systems per minute, 4 health requests per 7 s, then a 60 s cooldown (429).<br>
         No logging beyond access logs.<br>
         API version <span id="api-version">dev</span>. <a href="https://github.com/poeggi/mc_dualstack_checker/blob/main/LICENSE">AGPL-3.0</a>.
     </footer>

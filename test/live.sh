@@ -36,18 +36,19 @@ check "page"             is "$WEB/" 200
 check "script"           is "$WEB/mc_dualstack_check.js" 200
 check "stylesheet"       is "$WEB/mc_dualstack_check.css" 200
 check "icon"             is "$WEB/favicon.svg" 200
-check "config: own provider"        json "$WEB/api/config" "d['provider'] == 'own'"
+check "config: backend configured"  json "$WEB/api/config" "d['backend'] and d['version']"
 check "health: ok, ipv6"            json "$WEB/api/health" "d['ok'] and d['ipv6']"
-check "resolve: A and AAAA"         json "$WEB/api/resolve?host=$HOST" "'$V4' in d['a'] and '$V6' in d['aaaa']"
-check "resolve: v4-only host"       json "$WEB/api/resolve?host=$JAVA_HOST" "d['a'] and not d['aaaa'] and 'errors' not in d"
+check "ping: name, IPv4"            json "$WEB/api/ping?host=$HOST&family=4&port=19132&edition=bedrock" "d['state'] == 'online' and d['ip'] == '$V4'"
+check "ping: name, IPv6"            json "$WEB/api/ping?host=$HOST&family=6&port=19132&edition=bedrock" "d['state'] == 'online' and d['ip'] == '$V6'"
 check "ping: bedrock v4 literal"    json "$WEB/api/ping?ip=$V4&port=19132&edition=bedrock&host=$HOST" "d['state'] == 'online'"
 check "ping: bedrock v6 literal"    json "$WEB/api/ping?ip=$V6&port=19132&edition=bedrock&host=$HOST" "d['state'] == 'online'"
-java_ip=$(curl -s "$WEB/api/resolve?host=$JAVA_HOST" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["a"][0])')
-check "ping: java hostname"         json "$WEB/api/ping?ip=$java_ip&port=25565&edition=java&host=$JAVA_HOST" "d['state'] == 'online' and d['info']['players_max'] > 0"
+check "ping: java hostname"         json "$WEB/api/ping?host=$JAVA_HOST&family=4&port=25565&edition=java" "d['state'] == 'online' and d['info']['players_max'] > 0"
+check "ping: v4-only host, IPv6"    json "$WEB/api/ping?host=$JAVA_HOST&family=6&port=25565&edition=java" "d['state'] == 'no_dns'"
 check "ping: second call cached"    json "$WEB/api/ping?ip=$V4&port=19132&edition=bedrock&host=$HOST" "d.get('cached') and d['age_s'] >= 0"
 check "ping: invalid ip -> 400"     is "$WEB/api/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$WEB/api/ping?ip=$V4&port=70000" 400
 check "unknown endpoint -> 404"     is "$WEB/api/nope" 404
+check "no resolve endpoint -> 404"  is "$WEB/api/resolve?host=$HOST" 404
 check "scripts hidden by name"      is "$WEB/api.php" 404
 check "config hidden by name"       is "$WEB/config.php" 404
 
@@ -63,6 +64,8 @@ check "ping: v6 literal bracketed"  json "$API/ping?ip=%5B$V6%5D&port=19132" "d[
 check "ping: offline target"        json "$API/ping?ip=192.0.2.1&port=1&edition=java" "d['state'] == 'offline'"
 check "cors header for any origin"  sh -c "curl -s -D - -o /dev/null -H 'Origin: https://example.org' '$API/ping?ip=$V4&port=19132' | grep -qi 'access-control-allow-origin: https://example.org'"
 check "internal target -> 400"     is "$API/ping?ip=127.0.0.1&port=22&edition=java" 400
+check "internal name -> no_dns"     json "$API/ping?host=localtest.me&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
+check "local name, no lookup"       json "$API/ping?host=localhost&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
 check "no resolve endpoint -> 404"  is "$API/resolve?host=$HOST" 404
 check "unknown endpoint -> 404"     is "$API/nope" 404
 check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/ping?ip=nope&port=1' | grep -qiE '^(server|via):'"
