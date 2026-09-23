@@ -6,6 +6,8 @@ RewriteEngine On
 RewriteCond %{THE_REQUEST} ^\S+\s[^?\s]*\.php[?\s/]
 RewriteRule ^ - [R=404,L]
 RewriteRule ^api/[^/]+$ api.php [L]
+# Dot files, such as the relay's health cache, are not served.
+RewriteRule (^|/)\. - [R=404,L]
 
 # Page, script and stylesheet change together with each release. Browsers
 # revalidate them on every load (a cheap 304 when unchanged), so a cached

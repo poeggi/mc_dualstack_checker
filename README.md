@@ -32,11 +32,12 @@ The public API is the backend, documented in [docs/api.md](docs/api.md): the end
 The browser only ever talks to the web host. The frontend relay serves the page only, at `api/<endpoint>`:
 
 - `api/config`: `{"backend": true | false, "version": "..."}`, whether a backend is configured and the release.
-- `api/ping` and `api/health`: passed to the backend at `MC_BACKEND` with the client's address, the answer and status code unchanged. Only the parameters of `/ping` are passed on.
+- `api/ping`: passed to the backend at `MC_BACKEND` with the client's address, the answer and status code unchanged. Only the parameters of `/ping` are passed on.
+- `api/health`: one copy of the backend's `/health` for all visitors, refreshed at most every 7 s and asked for as the web host. Visitors' reloads never count against the backend's health limit.
 
 The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It does no DNS itself.
 
-Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS record, DNS error, Omitted, Unavailable (no route from the checker). Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. For 30 s, half the backend's cache time, the page shows its last result for the same query again instead of asking; the debug log says so.
+Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS record, DNS error, Omitted, Unavailable (no route from the checker). Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. For 30 s, half the backend's cache time, the page shows its last result for the same query again instead of asking; the debug log says so. It keeps the backend's health for 30 s per tab as well.
 
 ## Development and build
 

@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 
-// Whether the relay has a backend configured, read once at startup.
+// Whether the relay has a backend configured, and the page's release,
+// read once at startup.
 var backendReady = false;
+var pageVersion = "";
 // Seconds the backend caches a probe result.
 var CACHE_TTL = 60;
 // Seconds the page shows its own last result for the same query again
 // instead of asking the backend: half the backend's cache time.
 var REUSE_SECONDS = CACHE_TTL / 2;
+// Seconds the page keeps the backend's health, per tab and release.
+var HEALTH_SECONDS = 30;
 // Default ports per edition. Bedrock servers commonly listen on 19133 for
 // IPv6, so that is the IPv6 default and the first IPv6 fallback.
 var EDITIONS = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } };
@@ -259,6 +263,20 @@ function remember(key, data) {
     } catch (e) {}
 }
 
+// loadHealth answers from the tab's kept health while it is young and
+// from the same release, so reloads do not ask again.
+function loadHealth() {
+    var now = Math.floor(Date.now() / 1000);
+    try {
+        var kept = JSON.parse(sessionStorage.getItem("health") || "null");
+        if (kept && kept.release === pageVersion && now - kept.at < HEALTH_SECONDS) return Promise.resolve(kept.data);
+    } catch (e) {}
+    return api("health").then(function (h) {
+        try { sessionStorage.setItem("health", JSON.stringify({ release: pageVersion, at: now, data: h })); } catch (e) {}
+        return h;
+    });
+}
+
 function runCheck(q) {
     if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
     showNotice("");
@@ -482,13 +500,14 @@ function backendNotice(msg) {
 
 api("config").then(function (cfg) {
     backendReady = !!cfg.backend;
+    pageVersion = cfg.version || "";
     if (cfg.version) $("version").textContent = cfg.version;
 }, function () {
     backendReady = false;
 }).then(function () {
     loadFromURL();
     if (!backendReady) return;
-    api("health").then(function (h) {
+    loadHealth().then(function (h) {
         if (h.version) $("version").textContent += ", API " + h.version;
         if (h.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
     }).catch(function () {});
