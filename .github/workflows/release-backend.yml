@@ -43,6 +43,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
+        # One file at a time with retries: replacing an asset of a release
+        # published again can fail while the old asset is still being removed.
         run: |
-          gh release upload "$TAG" dist/mc_dualstack_check_linux_* dist/deploy.tar.gz --clobber
-          gh release upload "$TAG" dist/SHA256SUMS --clobber
+          upload() {
+            for i in 1 2 3; do
+              gh release upload "$TAG" "$1" --clobber && return 0
+              sleep 10
+            done
+            return 1
+          }
+          for f in dist/mc_dualstack_check_linux_* dist/deploy.tar.gz; do upload "$f"; done
+          upload dist/SHA256SUMS
