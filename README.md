@@ -4,8 +4,9 @@ Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
 Supports Bedrock (RakNet ping, UDP) and Java (Server List Ping, TCP).
 The own backend does the probing. A third-party provider (mcsrvstat.us) exists as an interim option.
 
-Live: https://www.poggensee.it/mc_dualstack_check/
-API: https://mcdscheck-api.poggensee.it/
+Live Website: https://www.poggensee.it/mc_dualstack_check/ 
+
+Backend API: https://mcdscheck-api.poggensee.it/
 
 Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone who runs a modified copy, also as a network service, has to offer its source under the same terms.
 
