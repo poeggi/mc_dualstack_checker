@@ -305,7 +305,7 @@ function el(tag, cls, text) {
 }
 function row(key, valueNode, dim) {
     var r = el("div", "ip-row");
-    r.appendChild(el("span", "ip-row-key text-label", key));
+    r.appendChild(el("span", "ip-row-key text-label text-caps", key));
     var v = el("span", "ip-row-val" + (dim ? " text-dim" : ""));
     if (typeof valueNode === "string") v.textContent = valueNode; else v.appendChild(valueNode);
     r.appendChild(v);
