@@ -30,11 +30,12 @@ type ServerInfo struct {
 //
 // State is one of:
 //
-//	online    - the server answered
-//	offline   - no answer
-//	no_route  - this host has no connectivity for the address family
-//	no_dns    - the host name has no record in the requested family
-//	dns_error - resolving the host name failed
+//	online      - the server answered
+//	offline     - no answer, or the server itself refused the port
+//	unreachable - a router or firewall on the way rejected the probe
+//	no_route    - this host has no connectivity for the address family
+//	no_dns      - the host name has no record in the requested family
+//	dns_error   - resolving the host name failed
 type PingResult struct {
 	State  string      `json:"state"`
 	IP     string      `json:"ip,omitempty"`
@@ -67,8 +68,20 @@ func ping(ctx context.Context, edition string, ip net.IP, port int, hostLabel st
 	if err == nil {
 		return PingResult{State: "online", RTTms: time.Since(start).Milliseconds(), Info: info}
 	}
-	if isNoRoute(err) {
+	return failure(err, ip)
+}
+
+// failure is the result of a probe of ip that failed with err.
+func failure(err error, ip net.IP) PingResult {
+	switch {
+	case localNoRoute(err, ip):
 		return PingResult{State: "no_route", Error: describe(err)}
+	case rejected(err):
+		msg := describe(err)
+		if errors.Is(err, syscall.ENETUNREACH) {
+			msg += " (rejected by a router, ICMP unreachable)"
+		}
+		return PingResult{State: "unreachable", Error: msg}
 	}
 	return PingResult{State: "offline", Error: describe(err)}
 }
@@ -78,14 +91,36 @@ type probeError string
 
 func (e probeError) Error() string { return string(e) }
 
-// isNoRoute reports whether the error means the local host cannot use this
-// address family at all, as opposed to the remote side not answering.
-// EHOSTUNREACH and EACCES are NOT local: Linux reports them when a router
-// or firewall on the way answers with ICMP unreachable.
-func isNoRoute(err error) bool {
-	return errors.Is(err, syscall.ENETUNREACH) ||
-		errors.Is(err, syscall.EADDRNOTAVAIL) ||
-		errors.Is(err, syscall.EAFNOSUPPORT)
+// localNoRoute reports whether the error means this host cannot use the
+// address family of ip at all. "Network unreachable" can also be a
+// router's answer; a UDP socket connected to ip asks only the local routing
+// table, without sending anything, and so tells the two apart.
+func localNoRoute(err error, ip net.IP) bool {
+	if errors.Is(err, syscall.EADDRNOTAVAIL) || errors.Is(err, syscall.EAFNOSUPPORT) {
+		return true
+	}
+	if !errors.Is(err, syscall.ENETUNREACH) {
+		return false
+	}
+	c, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: ip, Port: 9})
+	if err != nil {
+		return true
+	}
+	c.Close()
+	return false
+}
+
+// rejected reports whether something other than the probed host refused
+// the probe: a router or firewall answering with ICMP unreachable or
+// administratively prohibited.
+func rejected(err error) bool {
+	for _, e := range []error{syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.EHOSTDOWN,
+		syscall.ENONET, syscall.EACCES, syscall.EPERM} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // describe turns a probe error into a short reason that does not depend on
@@ -103,6 +138,8 @@ func describe(err error) string {
 		return "connection refused (port closed)"
 	case errors.Is(err, syscall.EHOSTUNREACH):
 		return "no route to host (rejected by a router or firewall, ICMP unreachable)"
+	case errors.Is(err, syscall.EHOSTDOWN), errors.Is(err, syscall.ENONET):
+		return "host unknown (rejected by a router, ICMP unreachable)"
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return "permission denied (rejected by a firewall, ICMP administratively prohibited)"
 	case errors.Is(err, syscall.ECONNRESET):

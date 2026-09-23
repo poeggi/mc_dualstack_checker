@@ -36,7 +36,7 @@ The browser only ever talks to the web host. The frontend relay serves the page 
 
 The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It does no DNS itself.
 
-Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, No DNS record, DNS error, Omitted, Unavailable (no route from the checker). A 429 from the API is shown as a countdown.
+Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS record, DNS error, Omitted, Unavailable (no route from the checker). Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown.
 
 ## Development and build
 
@@ -58,6 +58,7 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 ## Tests
 
+- `cd backend && go test ./...` checks how failed probes are classified. CI runs it on every push.
 - `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits. CI runs it on every push.
 - `sh test/live.sh` checks the deployed web interface and API end to end (hostnames, IPv4 and IPv6 literals, Bedrock and Java, versions). The "Live check" workflow runs it after each frontend deploy, once it sees the released version on the VM, plus daily and on demand.
 

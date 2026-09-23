@@ -16,11 +16,12 @@ jobs:
       - name: gofmt
         working-directory: backend
         run: test -z "$(gofmt -l .)"
-      - name: vet and build
+      - name: vet, build and unit tests
         working-directory: backend
         run: |
           go vet ./...
           go build ./...
+          go test ./...
       - name: backend checks
         run: sh test/backend.sh
 

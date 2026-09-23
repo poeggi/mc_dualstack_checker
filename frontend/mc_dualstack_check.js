@@ -179,7 +179,13 @@ function checkFamily(fam, target, ports, edition, log) {
     var result = { state: "offline", ip: target.ip || "", ports_tried: [] };
     function tryPort(i) {
         if (i >= ports.length) {
-            log.push("OFFLINE: " + family + " did not respond on any port");
+            if (result.rejected) {
+                log.push("UNREACHABLE: " + family + " was rejected on the way");
+                result.state = "unreachable";
+                result.reason = result.rejected;
+            } else {
+                log.push("OFFLINE: " + family + " did not respond on any port");
+            }
             return result;
         }
         var port = ports[i];
@@ -217,6 +223,7 @@ function checkFamily(fam, target, ports, edition, log) {
                 return result;
             }
             log.push(family + " port " + port + ": " + (r.error || "no response"));
+            if (r.state === "unreachable") result.rejected = r.error || "rejected";
             result.cached = r.cached; result.age_s = r.age_s;
             return tryPort(i + 1);
         });
@@ -317,17 +324,17 @@ var cardCounter = 0;
 
 function ipCard(r, label) {
     var state = r.state;
-    var cls = state === "online" ? "online" : state === "offline" ? "offline" : "unknown";
+    var cls = state === "online" ? "online" : state === "offline" || state === "unreachable" ? "offline" : "unknown";
     var card = el("div", "ip-card " + cls);
     var head = el("div", "ip-card-head");
     head.appendChild(el("span", "", label));
     var badges = el("span", "badge-group");
-    if (state === "online" || state === "offline" || state === "no_route") {
+    if (state === "online" || state === "offline" || state === "unreachable" || state === "no_route") {
         badges.appendChild(el("span", r.cached ? "badge cache" : "badge live", r.cached ? "Cached" : "Live"));
     }
     if (state === "online" && r.ports_tried.length > 1) badges.appendChild(el("span", "badge fallback", "Fallback"));
     var badgeText = {
-        online: "Online", offline: "Offline", no_dns: "No DNS record",
+        online: "Online", offline: "Offline", unreachable: "Unreachable", no_dns: "No DNS record",
         dns_error: "DNS error", omitted: "Omitted", no_route: "Unavailable"
     }[state] || state;
     badges.appendChild(el("span", "badge " + cls, badgeText));
@@ -369,6 +376,10 @@ function ipCard(r, label) {
     } else if (state === "offline") {
         rows.appendChild(row("Status", "No response", true));
         rows.appendChild(row("Ports tried", portList(r.ports_tried, -1)));
+    } else if (state === "unreachable") {
+        rows.appendChild(row("Status", "Rejected on the way", true));
+        rows.appendChild(row("Reason", r.reason || "", true));
+        rows.appendChild(row("Ports tried", portList(r.ports_tried, -1)));
     } else {
         rows.appendChild(row("Info", r.reason || "", true));
     }
@@ -389,14 +400,14 @@ function render(data) {
     grid.appendChild(ipCard(data.ipv6, "IPv6"));
 
     var showDebug = [data.ipv4.state, data.ipv6.state].some(function (st) {
-        return st === "offline" || st === "no_route" || st === "dns_error";
+        return st === "offline" || st === "unreachable" || st === "no_route" || st === "dns_error";
     });
     var dbg = $("debug-log");
     dbg.textContent = "";
     data.log.forEach(function (line) {
         var cls = "";
         if (line.indexOf("ONLINE") === 0) cls = "d-ok";
-        else if (line.indexOf("ERROR") === 0 || line.indexOf("OFFLINE") === 0) cls = "d-err";
+        else if (/^(ERROR|OFFLINE|UNREACHABLE)/.test(line)) cls = "d-err";
         else if (line.indexOf("failed") >= 0 || line.indexOf("retrying") >= 0) cls = "d-warn";
         dbg.appendChild(el("div", cls, line));
     });

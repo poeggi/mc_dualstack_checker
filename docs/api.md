@@ -53,17 +53,18 @@ Names are looked up as absolute names, so the checker host's search domains are 
 
 | Field | Meaning |
 |---|---|
-| `state` | `online`, `offline`, `no_route`, `no_dns` or `dns_error`, see below |
+| `state` | `online`, `offline`, `unreachable`, `no_route`, `no_dns` or `dns_error`, see below |
 | `ip` | the probed address |
 | `rtt_ms` | round trip of the probe, `online` only |
-| `error` | short reason, `offline`, `no_route` and `dns_error` only: `timeout`, `connection refused (port closed)`, `connection reset`, `network unreachable`, `invalid reply: ...`, `lookup failed` and similar |
+| `error` | short reason, all states but `online` and `no_dns`: `timeout`, `connection refused (port closed)`, `connection reset`, `no route to host (rejected by a router or firewall, ICMP unreachable)`, `invalid reply: ...`, `lookup failed` and similar |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `info` | server data; `gamemode`, `map`, `server_id` are Bedrock only; formatting codes are stripped from `motd` and `map` |
 
 States:
 
 - `online`: the server answered.
-- `offline`: no answer. A router or firewall rejecting the probe is `offline` too.
+- `offline`: no answer, or the server itself refused the port.
+- `unreachable`: something other than the server rejected the probe: a router or firewall on the way answered with ICMP unreachable or administratively prohibited.
 - `no_route`: the checker host itself has no connectivity for this address family.
 - `no_dns`: `host` has no record in `family`. Name lookups only.
 - `dns_error`: resolving `host` failed. Name lookups only.
