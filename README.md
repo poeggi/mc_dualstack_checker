@@ -12,7 +12,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what a browser cannot: resolve a name and send one probe packet. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus `api.php`, a same-origin relay so the browser never talks to third parties. Changing behaviour means editing JavaScript, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus `api.php`, a same-origin relay so the browser never talks to third parties. Changing behaviour means editing JavaScript, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The backend must run on a host with real IPv6 egress. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
