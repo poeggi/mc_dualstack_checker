@@ -1,2 +1,8 @@
 # The web host runs PHP as CGI and refuses scripts (403) without this.
 Options +ExecCGI
+
+# The API is served at api/<endpoint>. Scripts are not reachable by name.
+RewriteEngine On
+RewriteCond %{THE_REQUEST} ^\S+\s[^?\s]*\.php[?\s/]
+RewriteRule ^ - [R=404,L]
+RewriteRule ^api/[^/]+$ api.php [L]

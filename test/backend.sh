@@ -12,7 +12,7 @@ B="http://localhost:$PORT"
 PORT=$PORT go run . >/dev/null 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null' EXIT
-for i in $(seq 1 60); do curl -fsS "$B/healthz" >/dev/null 2>&1 && break; sleep 1; done
+for i in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 1; done
 
 PY=python3; "$PY" -c pass >/dev/null 2>&1 || PY=python
 fails=0
@@ -27,13 +27,15 @@ is() { [ "$(status "$1")" = "$2" ]; }
 json() { curl -s -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
 
 echo "== endpoints"
-check "healthz"                     json "$B/healthz" "d['ok'] and 'version' in d"
+check "health"                      json "$B/health" "d['ok'] and 'version' in d"
 check "resolve localhost"           json "$B/resolve?host=localhost" "'127.0.0.1' in d['a']"
 check "resolve: invalid host -> 400" is "$B/resolve?host=bad%20host" 400
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error']"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400
 check "ping: invalid edition -> 400" is "$B/ping?ip=127.0.0.1&port=1&edition=pocket" 400
+check "unknown endpoint -> 404"     json "$B/nope" "d['error']"
+check "POST -> 405 with JSON"       sh -c "curl -s -X POST '$B/ping' | grep -q '\"error\"'"
 
 echo "== cache"
 check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d.get('cached') and d['age_s'] >= 0"

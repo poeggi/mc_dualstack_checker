@@ -53,4 +53,4 @@ systemctl restart caddy
 
 echo "== done"
 systemctl --no-pager --lines=0 status mc-dualstack-check caddy mcdc-tick.timer | grep -E 'Active|Loaded' || true
-curl -fsS http://127.0.0.1:8080/healthz && echo
+curl -fsS http://127.0.0.1:8080/health && echo

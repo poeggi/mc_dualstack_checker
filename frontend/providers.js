@@ -9,16 +9,15 @@
 //   ping(ip, port, edition, host)    -> { state, info?, error?, rtt_ms?, cached?, age_s? }
 //   health()                         -> { ipv6?: bool }
 //
-// Every call goes to api.php on this host, which resolves names itself and
-// relays probes upstream. Providers only differ in how they read the
+// Every call goes to api/<endpoint> on this host, which resolves names
+// itself and relays probes upstream. Providers only differ in how they read the
 // upstream's answer. Errors are thrown as
 // { rateLimited, retry } | { unreachable } | { message }.
 var PROVIDERS = {};
 
-function api(op, params) {
-    var q = new URLSearchParams(params || {});
-    q.set("op", op);
-    return fetch("api.php?" + q.toString(), { cache: "no-store" }).then(
+function api(endpoint, params) {
+    var q = new URLSearchParams(params || {}).toString();
+    return fetch("api/" + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
         function (res) {
             return res.json().catch(function () { return {}; }).then(function (body) {
                 if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
@@ -30,7 +29,7 @@ function api(op, params) {
     );
 }
 
-// -- own: the Go service in backend/ ------------------------------
+// -- own: the checker backend --------------------------------------
 PROVIDERS.own = {
     label: "the checker backend",
     notice: "",

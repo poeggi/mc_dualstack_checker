@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -74,10 +72,10 @@ func pingBedrock(ctx context.Context, network, ip string, port int) (*ServerInfo
 func parsePong(b []byte) (*ServerInfo, error) {
 	const hdr = 1 + 8 + 8 + 16 + 2
 	if len(b) < hdr || b[0] != raknetUnconnectedPong {
-		return nil, errors.New("not an unconnected pong")
+		return nil, probeError("not an unconnected pong")
 	}
 	if !bytes.Equal(b[17:33], raknetMagic) {
-		return nil, errors.New("bad raknet magic")
+		return nil, probeError("bad raknet magic")
 	}
 	slen := int(binary.BigEndian.Uint16(b[33:35]))
 	if hdr+slen > len(b) {
@@ -105,7 +103,7 @@ func parsePong(b []byte) (*ServerInfo, error) {
 	info.PlayersOnline, _ = strconv.Atoi(get(4))
 	info.PlayersMax, _ = strconv.Atoi(get(5))
 	if info.Edition == "" {
-		return nil, fmt.Errorf("empty pong payload")
+		return nil, probeError("empty pong payload")
 	}
 	return info, nil
 }

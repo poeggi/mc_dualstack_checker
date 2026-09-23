@@ -6,7 +6,7 @@
 //
 //	GET /resolve?host=<name>                          -> A and AAAA records
 //	GET /ping?ip=<addr>&port=<n>&edition=bedrock|java -> one probe, cached 60 s
-//	GET /healthz
+//	GET /health
 package main
 
 import (
@@ -39,9 +39,12 @@ func main() {
 	origins := strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /resolve", withCORS(origins, handleResolve))
-	mux.HandleFunc("GET /ping", withCORS(origins, handlePing))
-	mux.HandleFunc("GET /healthz", withCORS(origins, handleHealth))
+	mux.HandleFunc("/resolve", endpoint(origins, handleResolve))
+	mux.HandleFunc("/ping", endpoint(origins, handlePing))
+	mux.HandleFunc("/health", endpoint(origins, handleHealth))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		httpError(w, http.StatusNotFound, "unknown endpoint")
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + port,
@@ -72,10 +75,10 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 	if err4 != nil || err6 != nil {
 		out.Errors = map[string]string{}
 		if err4 != nil {
-			out.Errors["a"] = err4.Error()
+			out.Errors["a"] = lookupReason(err4)
 		}
 		if err6 != nil {
-			out.Errors["aaaa"] = err6.Error()
+			out.Errors["aaaa"] = lookupReason(err6)
 		}
 	}
 	writeJSON(w, out)
@@ -101,6 +104,14 @@ func lookup(ctx context.Context, network, host string) ([]string, error) {
 		out = append(out, a.String())
 	}
 	return out, err
+}
+
+func lookupReason(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsTimeout {
+		return "timeout"
+	}
+	return "lookup failed"
 }
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +213,18 @@ func hasGlobalIPv6() bool {
 }
 
 // -- CORS --------------------------------------------------------
+
+// endpoint answers GET and HEAD, everything else with a JSON 405.
+func endpoint(allowed []string, next http.HandlerFunc) http.HandlerFunc {
+	return withCORS(allowed, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		next(w, r)
+	})
+}
 
 func withCORS(allowed []string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -58,7 +58,7 @@ func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResu
 			case <-e.ready:
 				return e.res
 			case <-ctx.Done():
-				return PingResult{State: "offline", Error: ctx.Err().Error()}
+				return PingResult{State: "offline", Error: describe(ctx.Err())}
 			}
 		}
 	}

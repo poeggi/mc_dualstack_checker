@@ -27,7 +27,7 @@ jobs:
         run: |
           want="${{ github.event.workflow_run.head_branch }}"
           for i in $(seq 1 60); do
-            got=$(curl -fsS https://mcdscheck-api.poggensee.it/healthz | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+            got=$(curl -fsS https://mcdscheck-api.poggensee.it/health | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
             echo "attempt $i: want $want, got $got"
             [ "$got" = "$want" ] && exit 0
             sleep 15

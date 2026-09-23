@@ -3,14 +3,23 @@
 // Same-origin API for the page. The browser never talks to anything but
 // this host; this script resolves names itself and relays probes to the
 // configured backend. config.php selects the provider:
-//   MC_PROVIDER  "own" (the Go backend at MC_BACKEND) or "mcsrvstat"
+//   MC_PROVIDER  "own" (the backend at MC_BACKEND) or "mcsrvstat"
 //   MC_BACKEND   base URL of the own backend
 //   MC_VERSION   release tag of the deployed page
 //
-//   api.php?op=config                              -> {"provider": ..., "version": ...}
-//   api.php?op=resolve&host=<name>                 -> {"a":[..],"aaaa":[..],"errors"?:{..}}
-//   api.php?op=ping&ip=<addr>&port=<n>&edition=<e> -> the upstream's JSON, unchanged
-//   api.php?op=health                              -> the own backend's /healthz, or {}
+// .htaccess maps api/<endpoint> here; the endpoint is the last path segment.
+//   api/config                                  -> {"provider": ..., "version": ...}
+//   api/resolve?host=<name>                     -> {"a":[..],"aaaa":[..],"errors"?:{..}}
+//   api/ping?ip=<addr>&port=<n>&edition=<e>     -> the upstream's JSON, unchanged
+//   api/health                                  -> the own backend's /health, or {}
+//
+// Also the router for the built-in development server: other paths are
+// served as static files.
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if (PHP_SAPI === 'cli-server' && !preg_match('#/api/[^/]+$#', $path)) {
+    return false;
+}
+
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
 
@@ -21,6 +30,12 @@ if (is_file($config)) {
 defined('MC_PROVIDER') || define('MC_PROVIDER', '');
 defined('MC_BACKEND') || define('MC_BACKEND', '');
 defined('MC_VERSION') || define('MC_VERSION', 'dev');
+
+// param reads a query parameter; anything but a plain string counts as absent.
+function param(string $name): string {
+    $v = $_GET[$name] ?? '';
+    return is_string($v) ? $v : '';
+}
 
 function fail(int $code, string $msg): never {
     http_response_code($code);
@@ -60,13 +75,13 @@ function relay(string $url, bool $own = false): never {
     exit;
 }
 
-switch ($_GET['op'] ?? '') {
+switch (basename($path)) {
 case 'config':
     echo json_encode(['provider' => MC_PROVIDER, 'version' => MC_VERSION]);
     break;
 
 case 'resolve':
-    $host = trim($_GET['host'] ?? '');
+    $host = trim(param('host'));
     if ($host === '' || strlen($host) > 253 || preg_match('/[^A-Za-z0-9._-]/', $host)) {
         fail(400, 'host is missing or invalid');
     }
@@ -86,9 +101,9 @@ case 'resolve':
     break;
 
 case 'ping':
-    $ip      = trim($_GET['ip'] ?? '', '[]');
-    $port    = (int)($_GET['port'] ?? 0);
-    $edition = $_GET['edition'] ?? 'bedrock';
+    $ip      = trim(param('ip'), '[]');
+    $port    = (int)param('port');
+    $edition = param('edition') ?: 'bedrock';
     if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
         fail(400, 'ip must be a literal IPv4 or IPv6 address');
     }
@@ -99,7 +114,7 @@ case 'ping':
         fail(400, 'edition must be bedrock or java');
     }
     if (MC_PROVIDER === 'own' && MC_BACKEND !== '') {
-        $q = http_build_query(['ip' => $ip, 'port' => $port, 'edition' => $edition, 'host' => $_GET['host'] ?? '']);
+        $q = http_build_query(['ip' => $ip, 'port' => $port, 'edition' => $edition, 'host' => param('host')]);
         relay(rtrim(MC_BACKEND, '/') . '/ping?' . $q, true);
     }
     if (MC_PROVIDER === 'mcsrvstat') {
@@ -110,11 +125,11 @@ case 'ping':
 
 case 'health':
     if (MC_PROVIDER === 'own' && MC_BACKEND !== '') {
-        relay(rtrim(MC_BACKEND, '/') . '/healthz', true);
+        relay(rtrim(MC_BACKEND, '/') . '/health', true);
     }
     echo '{}';
     break;
 
 default:
-    fail(400, 'unknown op');
+    fail(404, 'unknown endpoint');
 }

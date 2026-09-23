@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 
-// The provider (see providers.js) is chosen server-side in config.php and
-// read once at startup. null = no backend configured, checks disabled.
+// The provider (see providers.js) is chosen server-side and read once at
+// startup. null = no backend configured, checks disabled.
 var provider = null;
 // Default ports per edition. Bedrock servers commonly listen on 19133 for
 // IPv6, so that is the IPv6 default and the first IPv6 fallback.

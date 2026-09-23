@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -63,21 +62,21 @@ func pingJava(ctx context.Context, network, ip string, port int, hostLabel strin
 		return nil, fmt.Errorf("read packet length: %w", err)
 	}
 	if pktLen <= 0 || pktLen > javaMaxResponse {
-		return nil, fmt.Errorf("bad packet length %d", pktLen)
+		return nil, probeError(fmt.Sprintf("bad packet length %d", pktLen))
 	}
 	pktID, err := readVarint(r)
 	if err != nil {
 		return nil, err
 	}
 	if pktID != 0x00 {
-		return nil, fmt.Errorf("unexpected packet id 0x%02x", pktID)
+		return nil, probeError(fmt.Sprintf("unexpected packet id 0x%02x", pktID))
 	}
 	jsonLen, err := readVarint(r)
 	if err != nil {
 		return nil, err
 	}
 	if jsonLen <= 0 || jsonLen > javaMaxResponse {
-		return nil, fmt.Errorf("bad json length %d", jsonLen)
+		return nil, probeError(fmt.Sprintf("bad status length %d", jsonLen))
 	}
 	raw := make([]byte, jsonLen)
 	if _, err := io.ReadFull(r, raw); err != nil {
@@ -101,7 +100,7 @@ type javaStatus struct {
 func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 	var st javaStatus
 	if err := json.Unmarshal(raw, &st); err != nil {
-		return nil, fmt.Errorf("status json: %w", err)
+		return nil, probeError("malformed status")
 	}
 	info := &ServerInfo{
 		Edition:       "Java",
@@ -112,7 +111,7 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 		MOTD:          stripFormatting(flattenChat(st.Description)),
 	}
 	if info.Version == "" && info.MOTD == "" {
-		return nil, errors.New("empty status")
+		return nil, probeError("empty status")
 	}
 	return info, nil
 }
@@ -165,5 +164,5 @@ func readVarint(r *bufio.Reader) (int, error) {
 			return int(int32(result)), nil
 		}
 	}
-	return 0, errors.New("varint too long")
+	return 0, probeError("varint too long")
 }

@@ -59,4 +59,4 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: |
           test -n "${{ vars.LIVE_URL }}" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
-          curl -fsS "${{ vars.LIVE_URL }}api.php?op=config" | grep -F '"provider":"${{ vars.MC_PROVIDER }}"'
+          curl -fsS "${{ vars.LIVE_URL }}api/config" | grep -F '"provider":"${{ vars.MC_PROVIDER }}"'
