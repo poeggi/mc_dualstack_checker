@@ -63,7 +63,7 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 ## Deployment
 
-Both workflows run on a published GitHub release. Nothing secret lives in the repo.
+Both workflows run on a published GitHub release.
 
 ### Backend (a Linux VM with systemd)
 
