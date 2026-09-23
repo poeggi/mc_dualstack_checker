@@ -5,6 +5,9 @@
 var backendReady = false;
 // Seconds the backend caches a probe result.
 var CACHE_TTL = 60;
+// Seconds the page shows its own last result for the same query again
+// instead of asking the backend: half the backend's cache time.
+var REUSE_SECONDS = CACHE_TTL / 2;
 // Default ports per edition. Bedrock servers commonly listen on 19133 for
 // IPv6, so that is the IPv6 default and the first IPv6 fallback.
 var EDITIONS = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } };
@@ -231,6 +234,31 @@ function checkFamily(fam, target, ports, edition, log) {
     return tryPort(0);
 }
 
+// -- Result reuse --------------------------------------------------
+// Results are kept per browser tab, keyed by the query, so a reload
+// within the window reuses them too.
+var REUSE_PREFIX = "result:";
+
+function recall(key) {
+    try {
+        var kept = JSON.parse(sessionStorage.getItem(REUSE_PREFIX + key) || "null");
+        if (kept && Math.floor(Date.now() / 1000) - kept.queried_at < REUSE_SECONDS) return kept;
+    } catch (e) {}
+    return null;
+}
+function remember(key, data) {
+    try {
+        var now = Math.floor(Date.now() / 1000);
+        for (var i = sessionStorage.length - 1; i >= 0; i--) {
+            var k = sessionStorage.key(i);
+            if (k.indexOf(REUSE_PREFIX) !== 0) continue;
+            var old = JSON.parse(sessionStorage.getItem(k) || "null");
+            if (!old || now - old.queried_at >= REUSE_SECONDS) sessionStorage.removeItem(k);
+        }
+        sessionStorage.setItem(REUSE_PREFIX + key, JSON.stringify(data));
+    } catch (e) {}
+}
+
 function runCheck(q) {
     if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
     showNotice("");
@@ -238,6 +266,14 @@ function runCheck(q) {
     document.title = q.host + " - Minecraft Server Dualstack Checker";
     if (!backendReady) {
         showNotice("No checker backend is configured yet. The check cannot run.");
+        return;
+    }
+    var key = toParams(q).toString();
+    var kept = recall(key);
+    if (kept) {
+        var age = Math.floor(Date.now() / 1000) - kept.queried_at;
+        kept.log.push("Reusing the result from " + age + "s ago, no new request");
+        render(kept);
         return;
     }
     setBusy(true);
@@ -266,7 +302,9 @@ function runCheck(q) {
 
     Promise.all([probe(4, ports4, log4), probe(6, ports6, log6)]).then(function (both) {
         setBusy(false);
-        render({ queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) });
+        var data = { queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) };
+        remember(key, data);
+        render(data);
     }).catch(function (err) {
         if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
         setBusy(false);
