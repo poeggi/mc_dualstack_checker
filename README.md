@@ -79,15 +79,16 @@ git clone https://github.com/poeggi/mc_dualstack_checker && sudo sh mc_dualstack
 
 This installs the backend as a systemd service (user `mcdc`, port 8080 on loopback), Caddy for TLS on 443 (Let's Encrypt), and the `mcdc-tick` timer. It installs missing tools with the distribution's package manager and opens TCP 80 and 443 in firewalld or ufw when one is active. A cloud firewall in front of the VM must allow them too.
 
-`mcdc-tick` runs every 7 minutes as root and does three things:
+`mcdc-tick` runs every 7 minutes as root and does four things:
 
 - It keeps Caddy at the version pinned in the script.
 - It installs the latest GitHub release whenever its `SHA256SUMS` changes, so a release published again under the same tag counts too. That covers the backend binary and, from `deploy.tar.gz`, the Caddy config, the landing page, the systemd units and `mcdc-tick` itself. Outbound only, no deploy credentials.
+- It keeps Caddy's `trusted_proxies` at the current addresses of the web host's DNS name, the `# trusted-host` line in `deploy/Caddyfile`. It resolves the name through the VM's normal resolver and reloads Caddy only when the addresses change; if the name does not resolve, the addresses stay. The addresses in the Caddyfile are the fallback.
 - It keeps the CPU busy for 30 s, about 7 % average load. Some free-tier clouds reclaim VMs whose CPU looks idle for days. To turn this off, set `Environment=BUSY_SECONDS=0` in a drop-in (`systemctl edit mcdc-tick`); releases replace the unit file itself, not drop-ins.
 
 So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
 
-Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. `/health` reports the running version.
+Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
 
 The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs `deploy/` into `deploy.tar.gz`, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
 

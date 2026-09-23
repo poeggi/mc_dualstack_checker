@@ -1,13 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Runs every 7 minutes from mcdc-tick.timer, as root. Three jobs:
+# Runs every 7 minutes from mcdc-tick.timer, as root. Four jobs:
 #   1. Keep Caddy at CADDY_VERSION.
 #   2. Install the latest GitHub release whenever its SHA256SUMS changes,
 #      so a release published again under the same tag counts as well: the
 #      backend binary, and from deploy.tar.gz the Caddy config, the landing
 #      page, the systemd units and this script. Outbound only: no deploy
 #      key, nothing connects into the VM.
-#   3. Keep the CPU busy for BUSY_SECONDS (default 30 s, about 7 % average
+#   3. Keep Caddy's trusted_proxies at the current addresses of the name on
+#      the Caddyfile's "# trusted-host" line, resolved by the system.
+#   4. Keep the CPU busy for BUSY_SECONDS (default 30 s, about 7 % average
 #      load). Some free-tier clouds reclaim VMs whose CPU looks idle for
 #      days. BUSY_SECONDS=0 in a drop-in (systemctl edit mcdc-tick) turns
 #      this off; releases replace the unit file, not drop-ins.
@@ -54,10 +56,43 @@ caddy_update() {
     echo "installed caddy v$CADDY_VERSION"
 }
 
-# sync_deploy <dir>: installs the deploy files of a release. Caddy reloads
-# when its config changed and restarts when its unit did.
+# trusted_render <Caddyfile>: sets its trusted_proxies line to the current
+# addresses of the name on its "# trusted-host" line. When the name does
+# not resolve, the line stays as it is.
+trusted_render() {
+    host=$(sed -n 's/^[[:space:]]*# trusted-host \([A-Za-z0-9.-]*\)[[:space:]]*$/\1/p' "$1" | head -n 1)
+    [ -n "$host" ] || return 0
+    addrs=$(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u | while read -r a; do
+        case "$a" in
+            *[!0-9A-Fa-f:.]*) ;;
+            *:*) printf '%s/128 ' "$a" ;;
+            *)   printf '%s/32 ' "$a" ;;
+        esac
+    done)
+    addrs=${addrs% }
+    [ -n "$addrs" ] || { echo "trusted host $host does not resolve, keeping its addresses" >&2; return 0; }
+    sed -i "s|^\([[:space:]]*trusted_proxies\) .*|\1 $addrs|" "$1"
+}
+
+# trust_update brings the installed Caddy config to the trusted host's
+# current addresses and reloads Caddy when they changed.
+trust_update() {
+    [ -f /etc/caddy/Caddyfile ] || return 0
+    cp /etc/caddy/Caddyfile "$tmp/Caddyfile" || return 1
+    trusted_render "$tmp/Caddyfile"
+    cmp -s "$tmp/Caddyfile" /etc/caddy/Caddyfile && return 0
+    "$CADDY" adapt --config "$tmp/Caddyfile" >/dev/null 2>&1 || { echo "trusted addresses give an invalid Caddyfile" >&2; return 1; }
+    put "$tmp/Caddyfile" /etc/caddy/Caddyfile 644 || return 1
+    systemctl try-reload-or-restart caddy
+    echo "trusted proxies: $(sed -n 's/^[[:space:]]*trusted_proxies //p' /etc/caddy/Caddyfile)"
+}
+
+# sync_deploy <dir>: installs the deploy files of a release, its Caddyfile
+# with the trusted host's current addresses. Caddy reloads when its config
+# changed and restarts when its unit did.
 sync_deploy() {
     d=$1
+    trusted_render "$d/Caddyfile"
     "$CADDY" adapt --config "$d/Caddyfile" >/dev/null 2>&1 || { echo "release Caddyfile invalid" >&2; return 1; }
     units=
     for u in $UNITS; do
@@ -122,6 +157,7 @@ stamp() {
 
 caddy_update || echo "caddy update failed, keeping the current one" >&2
 release_update || echo "update failed, keeping current version" >&2
+trust_update || echo "trusted proxies update failed, keeping the current ones" >&2
 stamp || true
 
 [ "$BUSY_SECONDS" -gt 0 ] && { timeout "$BUSY_SECONDS" sh -c 'while :; do :; done' || true; }

@@ -9,7 +9,10 @@ mcdscheck-api.poggensee.it {
 	@api path /ping /health
 	handle @api {
 		reverse_proxy 127.0.0.1:8080 {
-			trusted_proxies 88.198.28.140/32 2a01:4f8:d0a:52d1::2/128
+			# mcdc-tick sets trusted_proxies to the current addresses of the
+			# web host's name below; the addresses given here are the fallback.
+			# trusted-host www.poggensee.it
+			trusted_proxies 2a01:4f8:d0a:52d1::2/128 88.198.28.140/32
 		}
 	}
 	handle {
