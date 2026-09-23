@@ -7,8 +7,8 @@ var backendReady = false;
 var pageVersion = "";
 // Seconds the backend caches a probe result.
 var CACHE_TTL = 60;
-// Seconds the page shows its own last result for the same query again
-// instead of asking the backend: half the backend's cache time.
+// Up to this age of the backend's copy, the page answers a probe itself:
+// half the backend's cache time.
 var REUSE_SECONDS = CACHE_TTL / 2;
 // Seconds the page keeps the backend's health, per tab and release.
 var HEALTH_SECONDS = 30;
@@ -201,7 +201,7 @@ function checkFamily(fam, target, ports, edition, log) {
         var params = { port: port, edition: edition };
         if (result.ip) params.ip = result.ip; else params.family = fam;
         if (target.host) params.host = target.host;
-        return api("ping", params).then(function (r) {
+        return ping(params).then(function (r) {
             if (r.state === "no_dns") {
                 log.push("Resolved " + family + ": no " + record + " record");
                 return { state: "no_dns", reason: "No " + record + " record found" };
@@ -238,28 +238,45 @@ function checkFamily(fam, target, ports, edition, log) {
     return tryPort(0);
 }
 
-// -- Result reuse --------------------------------------------------
-// Results are kept per browser tab, keyed by the query, so a reload
-// within the window reuses them too.
-var REUSE_PREFIX = "result:";
+// -- Answer reuse --------------------------------------------------
+// While the backend's copy of a probe answer is younger than
+// REUSE_SECONDS, the page gives the answer the backend would give:
+// marked cached, with the age it has by now. Answers are kept per browser
+// tab, keyed by the request, so reloads reuse them too. Only the states
+// the backend caches are kept.
+var REUSE_PREFIX = "ping:";
+var CACHED_STATES = { online: true, offline: true, unreachable: true, no_route: true };
 
-function recall(key) {
-    try {
-        var kept = JSON.parse(sessionStorage.getItem(REUSE_PREFIX + key) || "null");
-        if (kept && Math.floor(Date.now() / 1000) - kept.queried_at < REUSE_SECONDS) return kept;
-    } catch (e) {}
-    return null;
+function keptAge(kept, now) {
+    return kept.r.age_s + Math.floor((now - kept.at) / 1000);
 }
-function remember(key, data) {
+function ping(params) {
+    var key = REUSE_PREFIX + new URLSearchParams(params).toString();
     try {
-        var now = Math.floor(Date.now() / 1000);
+        var kept = JSON.parse(sessionStorage.getItem(key) || "null");
+        if (kept) {
+            var age = keptAge(kept, Date.now());
+            if (age < REUSE_SECONDS) {
+                kept.r.cached = true;
+                kept.r.age_s = age;
+                return Promise.resolve(kept.r);
+            }
+        }
+    } catch (e) {}
+    return api("ping", params).then(function (r) {
+        if (CACHED_STATES[r.state]) keep(key, { at: Date.now(), r: r });
+        return r;
+    });
+}
+function keep(key, entry) {
+    try {
         for (var i = sessionStorage.length - 1; i >= 0; i--) {
             var k = sessionStorage.key(i);
             if (k.indexOf(REUSE_PREFIX) !== 0) continue;
             var old = JSON.parse(sessionStorage.getItem(k) || "null");
-            if (!old || now - old.queried_at >= REUSE_SECONDS) sessionStorage.removeItem(k);
+            if (!old || keptAge(old, entry.at) >= REUSE_SECONDS) sessionStorage.removeItem(k);
         }
-        sessionStorage.setItem(REUSE_PREFIX + key, JSON.stringify(data));
+        sessionStorage.setItem(key, JSON.stringify(entry));
     } catch (e) {}
 }
 
@@ -284,14 +301,6 @@ function runCheck(q) {
     document.title = q.host + " - Minecraft Server Dualstack Checker";
     if (!backendReady) {
         showNotice("No checker backend is configured yet. The check cannot run.");
-        return;
-    }
-    var key = toParams(q).toString();
-    var kept = recall(key);
-    if (kept) {
-        var age = Math.floor(Date.now() / 1000) - kept.queried_at;
-        kept.log.push("Reusing the result from " + age + "s ago, no new request");
-        render(kept);
         return;
     }
     setBusy(true);
@@ -320,9 +329,7 @@ function runCheck(q) {
 
     Promise.all([probe(4, ports4, log4), probe(6, ports6, log6)]).then(function (both) {
         setBusy(false);
-        var data = { queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) };
-        remember(key, data);
-        render(data);
+        render({ queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) });
     }).catch(function (err) {
         if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
         setBusy(false);

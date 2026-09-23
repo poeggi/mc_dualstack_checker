@@ -37,7 +37,7 @@ The browser only ever talks to the web host. The frontend relay serves the page 
 
 The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It does no DNS itself.
 
-Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS record, DNS error, Omitted, Unavailable (no route from the checker). Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. For 30 s, half the backend's cache time, the page shows its last result for the same query again instead of asking; the debug log says so. It keeps the backend's health for 30 s per tab as well.
+Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS record, DNS error, Omitted, Unavailable (no route from the checker). Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. The page keeps the backend's health for 30 s per tab.
 
 ## Development and build
 
