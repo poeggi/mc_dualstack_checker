@@ -30,11 +30,14 @@ type ServerInfo struct {
 //
 // State is one of:
 //
-//	online   - the server answered
-//	offline  - no answer
-//	no_route - this host has no connectivity for the address family
+//	online    - the server answered
+//	offline   - no answer
+//	no_route  - this host has no connectivity for the address family
+//	no_dns    - the host name has no record in the requested family
+//	dns_error - resolving the host name failed
 type PingResult struct {
 	State  string      `json:"state"`
+	IP     string      `json:"ip,omitempty"`
 	RTTms  int64       `json:"rtt_ms,omitempty"`
 	Error  string      `json:"error,omitempty"`
 	Info   *ServerInfo `json:"info,omitempty"`

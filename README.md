@@ -4,7 +4,7 @@ Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
 Supports Bedrock (RakNet ping, UDP) and Java (Server List Ping, TCP).
 The own backend does the probing. A third-party provider (mcsrvstat.us) exists as an interim option.
 
-![Icon](frontend/favicon.svg) Live Website: https://www.poggensee.it/mc_dualstack_check/ 
+![Icon](frontend/favicon.svg) Live Website: https://www.poggensee.it/mc_dualstack_check/
 
 Backend API: https://mcdscheck-api.poggensee.it/
 
@@ -12,14 +12,14 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what the frontend cannot. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus the site API, a same-origin relay so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The backend must run on a host with real IPv6 egress. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
 ## Layout
 
-- `backend/` - the backend service with two primitives, `/resolve` and `/ping`. One static binary.
-- `frontend/` - the page plus the site API, the same-origin relay to the backend. `providers.js` holds the backend adapters. `.htaccess` sets up the web host.
+- `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. One static binary.
+- `frontend/` - the page plus its relay to the backend. `providers.js` holds the backend adapters. `.htaccess` sets up the web host.
 - `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
@@ -27,7 +27,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Providers
 
-The browser only ever talks to this site. The site API resolves names itself and relays each probe to the provider chosen in the site config:
+The browser only ever talks to the web host. The frontend relay resolves names itself and relays each probe to the provider chosen in the frontend config:
 
 - `MC_PROVIDER = "own"`: the own backend at `MC_BACKEND`. The default.
 - `MC_PROVIDER = "mcsrvstat"`: api.mcsrvstat.us, third-party. Answers cached up to 5 minutes on their side, and their IPv4 Bedrock path is unreliable at the time of writing. The page shows a notice.
@@ -37,13 +37,21 @@ The browser only ever talks to this site. The site API resolves names itself and
 
 ## API
 
-Documented in [docs/api.md](docs/api.md): the site API (`api/<endpoint>`), the backend endpoints, the result shapes, the 60 s cache and the limits (more than 10 systems per minute per client starts a 60 s cooldown; 20 requests per client, refilled one per second; 64 probes in flight globally).
+The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the internal-address filter and the limits. Per client, more than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 64 probes run at once.
+
+The frontend relay serves the page only, at `api/<endpoint>` on the web host:
+
+- `api/config`: the provider and the release, `{"provider": "own" | "mcsrvstat" | "", "version": "..."}`.
+- `api/resolve?host=<name>`: `{"a": [...], "aaaa": [...], "errors"?: {...}}`, looked up on the web host. An entry in `errors` means the lookup failed, which is never shown as a missing record.
+- `api/ping` and `api/health`: passed to the provider. With `own`, the answer is the backend's, status code included.
+
+The relay answers `404` for unknown endpoints, `502` when the provider is unreachable and `503` when none is configured.
 
 Frontend behaviour: a literal IP skips DNS and omits the other family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, No DNS record, DNS error, Omitted, Unavailable (no route from the checker). A 429 from the API is shown as a countdown.
 
 ## Development and build
 
-The backend is written in Go. The site API is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain JavaScript.
+The backend is written in Go. The frontend relay is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain JavaScript.
 
 ```bash
 cd backend && go run .
@@ -53,15 +61,15 @@ cd backend && go run .
 cd frontend && php -S localhost:8000 api.php
 ```
 
-`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves everything else as static files. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. PHP runs there as CGI, which needs `Options +ExecCGI`.
+`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
 `frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it.
 
-The release workflow builds the backend with Go for `linux/amd64` and `linux/arm64`.
+The backend does not probe internal addresses. To check a server on the local network, start it with `FILTER_INTERNAL_TARGETS=false`.
 
 ## Tests
 
-- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, the cache and the limits. CI runs it on every push.
+- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits. CI runs it on every push.
 - `sh test/live.sh` checks the deployed web interface and API end to end (hostnames, IPv4 and IPv6 literals, Bedrock and Java, versions). The "Live check" workflow runs it after each frontend deploy, once it sees the released version on the VM, plus daily and on demand.
 
 ## Deployment
@@ -82,6 +90,8 @@ This installs the backend as a systemd service (user `mcdc`, port 8080), Caddy f
 
 `mcdc-tick` runs every 7 minutes and does two things: it pulls the latest GitHub release and installs it if the tag changed (outbound only, no deploy credentials), and it keeps the CPU busy for 30 s. Some free-tier clouds reclaim VMs whose CPU looks idle for days; the burst keeps the CPU busy at about 7 % average load.
 
+`mcdc-tick` only replaces the binary. After changes to `deploy/` (Caddy config, units, landing page), pull and rerun `bootstrap.sh`.
+
 Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. `/health` reports the running version.
 
 The release workflow builds `linux/amd64` and `linux/arm64` binaries and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
@@ -91,7 +101,7 @@ The release workflow builds `linux/amd64` and `linux/arm64` binaries and attache
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
 Variables: `FTP_TARGET_DIR` (`./` when the FTP user is jailed at the target folder), `MC_PROVIDER` (`own` or `mcsrvstat`), `MC_BACKEND` (own backend URL), `LIVE_URL` (optional, verifies the upload).
 
-The workflow writes `MC_PROVIDER`, `MC_BACKEND` and the release tag as `MC_VERSION` into the site config before upload; the page shows it in the footer.
+The workflow writes `MC_PROVIDER`, `MC_BACKEND` and the release tag as `MC_VERSION` into the frontend config before upload; the page shows it in the footer.
 
 ### Release flow
 

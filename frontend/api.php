@@ -14,9 +14,9 @@
 //   api/health                                  -> the own backend's /health, or {}
 //
 // Also the router for the built-in development server: other paths are
-// served as static files.
+// served as static files, scripts excepted.
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
-if (PHP_SAPI === 'cli-server' && !preg_match('#/api/[^/]+$#', $path)) {
+if (PHP_SAPI === 'cli-server' && !preg_match('#/api/[^/]+$#', $path) && !str_ends_with($path, '.php')) {
     return false;
 }
 
@@ -50,7 +50,7 @@ function relay(string $url, bool $own = false): never {
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 15,
-        CURLOPT_USERAGENT      => 'mc_dualstack_check/1.0.0 (https://www.poggensee.it/mc_dualstack_check/)',
+        CURLOPT_USERAGENT      => 'mc_dualstack_check/' . MC_VERSION . ' (https://www.poggensee.it/mc_dualstack_check/)',
         CURLOPT_HTTPHEADER     => $own ? ['X-Forwarded-For: ' . ($_SERVER['REMOTE_ADDR'] ?? '')] : [],
     ]);
     $retry  = null;
@@ -62,10 +62,9 @@ function relay(string $url, bool $own = false): never {
     });
     $raw    = curl_exec($ch);
     $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $reason = curl_error($ch);
     curl_close($ch);
     if ($raw === false || json_decode($raw) === null) {
-        fail(502, 'upstream unreachable: ' . ($reason ?: 'no JSON in reply'));
+        fail(502, 'upstream unreachable');
     }
     http_response_code($status);
     if ($status === 429 || $status === 503) {

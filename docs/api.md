@@ -1,35 +1,30 @@
 # API
 
-Two layers. The page talks to the site API on the web host, which relays probes to the backend. The backend is public as well and is the API to use from your own code; it allows cross-origin requests from any site.
+The public API is the backend at `https://mcdscheck-api.poggensee.it`. Use it from your own code; it allows cross-origin requests from any site. `https://mcdscheck-api.poggensee.it/` is a landing page with these links.
 
-All responses are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status.
+The web interface reaches the backend through its frontend, a relay on the web host (see README). That relay is part of the page, not a public API.
 
-## Site API: `https://www.poggensee.it/mc_dualstack_check/api/`
+All responses are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`.
 
-| Endpoint | Parameters | Answer |
-|---|---|---|
-| `GET api/config` | - | `{"provider": "own" \| "mcsrvstat" \| "", "version": "<release>"}` |
-| `GET api/resolve` | `host` | `{"a": [...], "aaaa": [...], "errors"?: {"a"?: "...", "aaaa"?: "..."}}` |
-| `GET api/ping` | `ip`, `port`, `edition`, `host`? | the provider's probe result, see below |
-| `GET api/health` | - | the backend's `/health`, or `{}` for other providers |
+## `GET /ping`
 
-`resolve` runs on the web host. Empty lists mean no record. An entry in `errors` means the lookup itself failed, which is reported separately so a failed lookup is never shown as a missing record.
+```
+GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>]
+GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java
+```
 
-`ping` validates `ip` (literal IPv4 or IPv6, brackets allowed), `port` (1-65535) and `edition` (`bedrock`, default, or `java`), then relays. With the `own` provider the answer is the backend's `/ping` document. With `mcsrvstat` it is api.mcsrvstat.us's document, unchanged. `host` is the name the user asked about; pass it so port fallbacks and both families count as one system for the limits.
+One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. `edition` defaults to `bedrock`.
 
-Status codes: `400` invalid parameter, `404` unknown endpoint, `429` client over a limit (`Retry-After` in seconds), `502` upstream unreachable, `503` no backend configured or backend busy (`Retry-After`).
+With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. Without `ip`, the backend resolves `host` and probes its first address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
 
-## Backend API: `https://mcdscheck-api.poggensee.it`
+`host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
-Public. `https://mcdscheck-api.poggensee.it/` is a landing page with these links. Unknown paths answer `404`, methods other than GET and HEAD `405`, both with a JSON error.
-
-### `GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>]`
-
-One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. The address family follows `ip`. `host` is only used in the Java handshake, some proxies route on it, and as the system name for the limits.
+Internal addresses answer `400`, given as `ip` or resolved from `host`: loopback, unspecified, link-local, RFC 1918, shared (`100.64.0.0/10`), unique local (`fc00::/7`), site-local, multicast and reserved ranges. IPv4-mapped and NAT64 forms of those count as well.
 
 ```json
 {
   "state": "online",
+  "ip": "2001:db8::1",
   "rtt_ms": 23,
   "cached": true,
   "age_s": 41,
@@ -49,29 +44,43 @@ One probe against one address and port: RakNet unconnected ping (UDP) for Bedroc
 
 | Field | Meaning |
 |---|---|
-| `state` | `online`, `offline`, or `no_route` (the checker host itself has no connectivity for this address family; a router or firewall rejecting the probe is `offline`) |
+| `state` | `online`, `offline`, `no_route`, `no_dns` or `dns_error`, see below |
+| `ip` | the probed address |
 | `rtt_ms` | round trip of the probe, `online` only |
-| `error` | short reason, `offline` and `no_route` only: `timeout`, `connection refused (port closed)`, `connection reset`, `network unreachable`, `invalid reply: ...` and similar |
+| `error` | short reason, `offline`, `no_route` and `dns_error` only: `timeout`, `connection refused (port closed)`, `connection reset`, `network unreachable`, `invalid reply: ...`, `lookup failed` and similar |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `info` | server data; `gamemode`, `map`, `server_id` are Bedrock only; formatting codes are stripped from `motd` and `map` |
 
-### `GET /resolve?host=<name>`
+States:
 
-Same shape as the site API's `resolve`, resolved on the backend host.
+- `online`: the server answered.
+- `offline`: no answer. A router or firewall rejecting the probe is `offline` too.
+- `no_route`: the checker host itself has no connectivity for this address family.
+- `no_dns`: `host` has no record in `family`. Name lookups only.
+- `dns_error`: resolving `host` failed. Name lookups only.
 
-### `GET /health`
+## `GET /health`
 
-`{"ok": true, "version": "v1.0.0", "ipv6": true}`. `ipv6` reports whether the host has a global IPv6 address; the page warns when it is false. Public, not rate limited.
+`{"ok": true, "version": "v1.1.0", "ipv6": true}`.
+
+The backend refreshes this status every 7 seconds. A request returns the last result. `ipv6` reports whether the host has a global IPv6 address; the page warns when it is false.
 
 ## Caching
 
-Probe results are cached for 60 seconds per `edition`, `ip` and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
+Probe results are cached for 60 seconds per `edition`, address and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
 
 ## Limits
 
-Per client address (direct callers: the peer address; through the site: the address the web host forwards):
+Per client address. Direct callers are charged for their own address, the web interface for the address its host forwards.
 
-- **Distinct systems.** More than 10 different systems within 60 seconds starts a 60 second cooldown; every request then answers `429` with `Retry-After`. A system is the `host` given, or the literal address; both families and all port fallbacks of one check count once.
+- **Distinct systems.** More than 10 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
+- **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.
 - **Request budget.** 20 requests, refilled at one per second. Over it: `429` with `Retry-After`.
 
+During a cooldown every request answers `429` with `Retry-After`.
+
 Global: at most 64 probes in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
+
+## Running your own
+
+The backend reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses, for tests against local servers.

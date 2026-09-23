@@ -55,14 +55,17 @@ echo "== api $API"
 check "landing page"     is "$API/" 200
 check "icon"             is "$API/favicon.svg" 200
 check "health: ok, ipv6"            json "$API/health" "d['ok'] and d['ipv6']"
-check "resolve: A and AAAA"         json "$API/resolve?host=$HOST" "'$V4' in d['a'] and '$V6' in d['aaaa']"
+check "ping: name, IPv4"            json "$API/ping?host=$HOST&family=4&port=19132" "d['state'] == 'online' and d['ip'] == '$V4'"
+check "ping: name, IPv6"            json "$API/ping?host=$HOST&family=6&port=19132" "d['state'] == 'online' and d['ip'] == '$V6'"
 check "ping: v4 literal"            json "$API/ping?ip=$V4&port=19132" "d['state'] == 'online'"
 check "ping: v6 literal bare"       json "$API/ping?ip=$V6&port=19132" "d['state'] == 'online'"
 check "ping: v6 literal bracketed"  json "$API/ping?ip=%5B$V6%5D&port=19132" "d['state'] == 'online'"
 check "ping: offline target"        json "$API/ping?ip=192.0.2.1&port=1&edition=java" "d['state'] == 'offline'"
 check "cors header for any origin"  sh -c "curl -s -D - -o /dev/null -H 'Origin: https://example.org' '$API/ping?ip=$V4&port=19132' | grep -qi 'access-control-allow-origin: https://example.org'"
+check "internal target -> 400"     is "$API/ping?ip=127.0.0.1&port=22&edition=java" 400
+check "no resolve endpoint -> 404"  is "$API/resolve?host=$HOST" 404
 check "unknown endpoint -> 404"     is "$API/nope" 404
-check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/health' | grep -qiE '^(server|via):'"
+check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/ping?ip=nope&port=1' | grep -qiE '^(server|via):'"
 check "landing page shows version"  sh -c "curl -s '$API/' | grep -q 'id=\"api-version\">v'"
 
 echo "== consistency"

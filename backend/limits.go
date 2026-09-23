@@ -2,12 +2,15 @@
 
 package main
 
-// Protection for the probe endpoint: a 60 s result cache that coalesces
-// identical probes, a per-client cooldown after too many distinct systems,
-// a per-client request budget, and a global cap on in-flight probes.
+// Protection for the endpoints: a 60 s result cache that coalesces
+// identical probes, a per-client cooldown after too many distinct systems
+// or health requests, a per-client request budget, a global cap on
+// in-flight probes, and a filter that keeps probes off internal networks.
 
 import (
 	"context"
+	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -21,6 +24,7 @@ const (
 	rlBurst       = 20
 	rlRefill      = time.Second
 	clientIdle    = 10 * time.Minute
+	healthMax     = 4
 	maxInFlight   = 64
 )
 
@@ -98,7 +102,9 @@ type client struct {
 	tokens  float64
 	last    time.Time
 	systems map[string]time.Time
+	health  []time.Time
 	blocked time.Time
+	cause   string
 }
 
 type limiter struct {
@@ -109,9 +115,44 @@ type limiter struct {
 
 var limits = &limiter{clients: map[string]*client{}, sweep: time.Now()}
 
-// admit charges one request to ip and, for probes, records the target
-// system. It returns the seconds to wait when the client is over a limit.
-func (l *limiter) admit(ip, system string) (wait int, reason string) {
+// admitProbe charges one probe request to ip and records the target system.
+func (l *limiter) admitProbe(ip, system string) (wait int, reason string) {
+	return l.admit(ip, func(c *client, now time.Time) string {
+		for s, t := range c.systems {
+			if now.Sub(t) > systemsWindow {
+				delete(c.systems, s)
+			}
+		}
+		if _, seen := c.systems[system]; !seen && len(c.systems) >= systemsMax {
+			return "systems"
+		}
+		c.systems[system] = now
+		return ""
+	})
+}
+
+// admitHealth charges one health request to ip. More than healthMax
+// within healthInterval start the cooldown.
+func (l *limiter) admitHealth(ip string) (wait int, reason string) {
+	return l.admit(ip, func(c *client, now time.Time) string {
+		recent := c.health[:0]
+		for _, t := range c.health {
+			if now.Sub(t) < healthInterval {
+				recent = append(recent, t)
+			}
+		}
+		c.health = append(recent, now)
+		if len(c.health) > healthMax {
+			return "health"
+		}
+		return ""
+	})
+}
+
+// admit applies the cooldown and the request budget, then check, which
+// names the limit a request breaks or returns "". It returns the seconds
+// to wait and the limit hit when the client is over one.
+func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) (wait int, reason string) {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -130,7 +171,7 @@ func (l *limiter) admit(ip, system string) (wait int, reason string) {
 		l.clients[ip] = c
 	}
 	if now.Before(c.blocked) {
-		return secondsUntil(c.blocked, now), "cooldown"
+		return secondsUntil(c.blocked, now), c.cause
 	}
 	c.tokens += now.Sub(c.last).Seconds() / rlRefill.Seconds()
 	if c.tokens > rlBurst {
@@ -142,19 +183,10 @@ func (l *limiter) admit(ip, system string) (wait int, reason string) {
 	}
 	c.tokens--
 
-	if system == "" {
-		return 0, ""
+	if cause := check(c, now); cause != "" {
+		c.blocked, c.cause = now.Add(cooldown), cause
+		return secondsUntil(c.blocked, now), cause
 	}
-	for s, t := range c.systems {
-		if now.Sub(t) > systemsWindow {
-			delete(c.systems, s)
-		}
-	}
-	if _, seen := c.systems[system]; !seen && len(c.systems) >= systemsMax {
-		c.blocked = now.Add(cooldown)
-		return secondsUntil(c.blocked, now), "cooldown"
-	}
-	c.systems[system] = now
 	return 0, ""
 }
 
@@ -180,3 +212,44 @@ func acquireProbe() bool {
 }
 
 func releaseProbe() { <-inFlight }
+
+// -- target filter -------------------------------------------------
+
+// internalNets are the ranges a probe must not reach while filterInternal
+// is set: the checker host itself, its local networks, and addresses that
+// are not unicast on the internet.
+var internalNets = func() []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+		"169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16",
+		"198.18.0.0/15", "224.0.0.0/3",
+		"::/127", "64:ff9b:1::/48", "100::/64", "fc00::/7", "fe80::/10",
+		"fec0::/10", "ff00::/8",
+	} {
+		out = append(out, netip.MustParsePrefix(s))
+	}
+	return out
+}()
+
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// internalTarget reports whether ip lies in internalNets, directly or as
+// the IPv4 address inside an IPv4-mapped or NAT64 address.
+func internalTarget(ip net.IP) bool {
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	a = a.Unmap()
+	if nat64.Contains(a) {
+		b := a.As16()
+		a = netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})
+	}
+	for _, p := range internalNets {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}

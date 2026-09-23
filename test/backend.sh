@@ -1,7 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Backend checks against a local instance: endpoints, validation, the
-# result cache and the per-client limits. Starts the backend itself.
+# Backend checks against local instances: endpoints, validation, name
+# lookups, the internal-address filter, the result cache and the per-client
+# limits. Starts two backends itself: one with the filter off, so probes can
+# target closed local ports, and one with the default filter.
 #
 #   sh test/backend.sh
 set -u
@@ -9,10 +11,15 @@ cd "$(dirname "$0")/../backend" || exit 1
 
 PORT=${PORT:-8089}
 B="http://localhost:$PORT"
-PORT=$PORT go run . >/dev/null 2>&1 &
+F="http://localhost:$((PORT + 1))"
+PORT=$PORT FILTER_INTERNAL_TARGETS=false go run . >/dev/null 2>&1 &
 pid=$!
-trap 'kill $pid 2>/dev/null' EXIT
-for i in $(seq 1 60); do curl -fsS "$B/health" >/dev/null 2>&1 && break; sleep 1; done
+PORT=$((PORT + 1)) go run . >/dev/null 2>&1 &
+fpid=$!
+trap 'kill $pid $fpid 2>/dev/null' EXIT
+for u in "$B" "$F"; do
+    for i in $(seq 1 60); do curl -fsS "$u/health" >/dev/null 2>&1 && break; sleep 1; done
+done
 
 PY=python3; "$PY" -c pass >/dev/null 2>&1 || PY=python
 fails=0
@@ -27,15 +34,30 @@ is() { [ "$(status "$1")" = "$2" ]; }
 json() { curl -s -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
 
 echo "== endpoints"
-check "health"                      json "$B/health" "d['ok'] and 'version' in d"
-check "resolve localhost"           json "$B/resolve?host=localhost" "'127.0.0.1' in d['a']"
-check "resolve: invalid host -> 400" is "$B/resolve?host=bad%20host" 400
-check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error']"
+check "health"                      json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
+check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400
 check "ping: invalid edition -> 400" is "$B/ping?ip=127.0.0.1&port=1&edition=pocket" 400
-check "unknown endpoint -> 404"     json "$B/nope" "d['error']"
-check "POST -> 405 with JSON"       sh -c "curl -s -X POST '$B/ping' | grep -q '\"error\"'"
+check "no resolve endpoint -> 404"  is "$B/resolve?host=localhost" 404
+check "unknown endpoint -> 404"     is "$B/nope" 404
+check "unknown endpoint: JSON error" json "$B/nope" "d['error']"
+check "POST -> 405 with JSON"       sh -c "curl -s -X POST -w '%{http_code}' '$B/ping' | tr -d '\n' | grep -q '\"error\".*405\$'"
+
+echo "== name lookups"
+check "name resolved by the backend" json "$B/ping?host=localhost&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1' and d['state'] == 'offline'"
+check "name without family -> 400"  is "$B/ping?host=localhost&port=9" 400
+check "neither ip nor host -> 400"  is "$B/ping?port=9" 400
+check "no record -> no_dns"         json "$B/ping?host=nonexistent.invalid&family=6&port=9" "d['state'] == 'no_dns'"
+
+echo "== internal-address filter (default on)"
+for t in 127.0.0.1 10.1.2.3 100.64.0.1 169.254.169.254 172.16.0.1 192.168.1.1 0.0.0.1 \
+         224.0.0.1 255.255.255.255 ::1 :: fd00::1 fe80::1 fec0::1 ff02::1 \
+         ::ffff:127.0.0.1 64:ff9b::a00:1; do
+    check "$t -> 400" is "$F/ping?ip=$t&port=9&edition=java" 400
+done
+check "name of an internal address -> 400" is "$F/ping?host=localhost&family=4&port=9&edition=java" 400
+check "public address passes"       is "$F/ping?ip=192.0.2.1&port=9&edition=java" 200
 
 echo "== cache"
 check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d.get('cached') and d['age_s'] >= 0"
@@ -45,9 +67,16 @@ CLIENT=203.0.113.7
 for i in 1 2 3 4 5 6 7 8 9 10; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
 check "10 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200
 check "11th system -> 429"          is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys11.example" 429
-check "cooldown carries Retry-After" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/resolve?host=localhost' | grep -qi '^Retry-After: '"
+check "429 names the systems limit" json "$B/health" "'systems' in d['error']"
+check "cooldown carries Retry-After" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | grep -qi '^Retry-After: '"
 CLIENT=203.0.113.8
-check "other client unaffected"     is "$B/resolve?host=localhost" 200
+for i in 1 2 3; do status "$B/health" >/dev/null; done
+check "4 health requests within 7 s ok" is "$B/health" 200
+check "5th health request -> 429"   is "$B/health" 429
+check "health cooldown covers probes" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
+check "429 names the health limit"  json "$B/health" "'health' in d['error']"
+CLIENT=203.0.113.9
+check "other client unaffected"     is "$B/health" 200
 unset CLIENT
 
 echo

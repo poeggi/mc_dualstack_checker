@@ -34,12 +34,12 @@
         <li><a href="https://github.com/poeggi/mc_dualstack_checker/blob/main/docs/api.md">API documentation</a></li>
         <li><a href="https://github.com/poeggi/mc_dualstack_checker">Source code (GitHub)</a></li>
     </ul>
-    <pre>GET /resolve?host=&lt;name&gt;
-GET /ping?ip=&lt;addr&gt;&amp;port=&lt;n&gt;&amp;edition=bedrock|java[&amp;host=&lt;name&gt;]
+    <pre>GET /ping?ip=&lt;addr&gt;&amp;port=&lt;n&gt;&amp;edition=bedrock|java[&amp;host=&lt;name&gt;]
+GET /ping?host=&lt;name&gt;&amp;family=4|6&amp;port=&lt;n&gt;&amp;edition=bedrock|java
 GET /health</pre>
     <pre>curl "https://mcdscheck-api.poggensee.it/ping?ip=2001:db8::1&amp;port=19132&amp;edition=bedrock"</pre>
     <footer>
-        Limit: 10 systems per minute per client, then a 60 s cooldown (429).<br>
+        Limits per client: 10 systems per minute, 4 health requests per 7 s, then a 60 s cooldown (429).<br>
         No logging beyond access logs.<br>
         API version <span id="api-version">dev</span>. <a href="https://github.com/poeggi/mc_dualstack_checker/blob/main/LICENSE">AGPL-3.0</a>.
     </footer>

@@ -2,8 +2,8 @@
 "use strict";
 
 // Backend providers. Each one offers the three calls the orchestration in
-// mc_dualstack_check.js needs, with the result shapes documented in README
-// under "API":
+// mc_dualstack_check.js needs, with the result shapes documented in
+// docs/api.md and README under "API":
 //
 //   resolve(host)                    -> { a: [...], aaaa: [...], errors?: {a, aaaa} }
 //   ping(ip, port, edition, host)    -> { state, info?, error?, rtt_ms?, cached?, age_s? }
