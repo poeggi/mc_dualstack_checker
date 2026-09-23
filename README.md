@@ -105,4 +105,4 @@ The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into the fr
 2. Create a GitHub release with a tag like `v1.0.0`.
 3. The release workflow attaches the backend binaries and the deploy files; the frontend deploy uploads the page. Check the Actions tab.
 
-The frontend deploy runs in the `production` environment. Add a required reviewer there to get a manual approval step.
+The frontend deploy runs in the `production` environment.
