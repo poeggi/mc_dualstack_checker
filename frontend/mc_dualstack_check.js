@@ -15,8 +15,9 @@ var REUSE_SECONDS = CACHE_TTL / 2;
 var REUSE_DELAY_MS = 100;
 // Seconds the page keeps the backend's health, per tab and release.
 var HEALTH_SECONDS = 30;
-// Default ports per edition. Bedrock servers commonly listen on 19133 for
-// IPv6, so that is the IPv6 default and the first IPv6 fallback.
+// Default ports per edition. The IPv6 port defaults to the IPv4 port;
+// Bedrock servers commonly listen on 19133 for IPv6, so that is the first
+// IPv6 fallback.
 var EDITIONS = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } };
 var DEFAULT_EDITION = "bedrock";
 
@@ -300,7 +301,10 @@ function loadHealth() {
 }
 
 function runCheck(q) {
-    if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+    if (retryTimer) {
+        clearInterval(retryTimer); retryTimer = null;
+        $("checking-indicator").querySelector(".checking-label").textContent = "Checking\u2026";
+    }
     showNotice("");
     $("results").hidden = true;
     document.title = q.host + " - Minecraft Server Dualstack Checker";

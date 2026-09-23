@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -28,9 +29,10 @@ import (
 	"time"
 )
 
+// A name lookup and a probe together stay within 10 s.
 const (
-	resolveTimeout = 5 * time.Second
-	pingTimeout    = 8 * time.Second
+	resolveTimeout = 4 * time.Second
+	pingTimeout    = 6 * time.Second
 	maxHostLen     = 253
 	healthInterval = 7 * time.Second
 )
@@ -73,7 +75,7 @@ func main() {
 		Addr:              "127.0.0.1:" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      pingTimeout + 2*time.Second,
+		WriteTimeout:      resolveTimeout + pingTimeout + 2*time.Second,
 	}
 	log.Printf("%s listening on %s (ipv6 egress: %v, internal targets filtered: %v)",
 		version, srv.Addr, ipv6Egress.Load(), filterInternal)
@@ -257,8 +259,8 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 var limitMessages = map[string]string{
-	"systems": "More than 10 systems within a minute, cooling down",
-	"health":  "More than 4 health requests within 7 seconds, cooling down",
+	"systems": fmt.Sprintf("More than %d systems within %d seconds, cooling down", systemsMax, int(systemsWindow.Seconds())),
+	"health":  fmt.Sprintf("More than %d health requests within %d seconds, cooling down", healthMax, int(healthInterval.Seconds())),
 	"rate":    "Too many requests, slow down",
 }
 
@@ -295,14 +297,15 @@ func httpError(w http.ResponseWriter, code int, msg string) {
 }
 
 // hasGlobalIPv6 reports whether any interface carries a global unicast IPv6
-// address. It is a hint only; the real test is a ping against a v6 target.
+// address. Unique local addresses (fc00::/7) do not count. It is a hint
+// only; the real test is a ping against a v6 target.
 func hasGlobalIPv6() bool {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return false
 	}
 	for _, a := range addrs {
-		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() == nil && ipn.IP.IsGlobalUnicast() {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() == nil && ipn.IP.IsGlobalUnicast() && !ipn.IP.IsPrivate() {
 			return true
 		}
 	}
