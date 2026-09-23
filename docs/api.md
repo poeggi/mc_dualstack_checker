@@ -2,7 +2,7 @@
 
 The public API is the backend at `https://mcdscheck-api.poggensee.it`. Use it from your own code; it allows cross-origin requests from any site. `https://mcdscheck-api.poggensee.it/` is a landing page with these links.
 
-The web interface reaches the backend through its frontend, a relay on the web host (see README). That relay is part of the page, not a public API.
+The web interface reaches the backend through its frontend, a relay on the web host (see README).
 
 All responses are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`.
 
