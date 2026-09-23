@@ -43,15 +43,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        # One file at a time with retries: replacing an asset of a release
-        # published again can fail while the old asset is still being removed.
+          RID: ${{ github.event.release.id }}
+        # A release published again under the same tag still holds its old
+        # assets. They are removed by ID from the assets list, which is
+        # current even when the release object lags behind.
         run: |
-          upload() {
-            for i in 1 2 3; do
-              gh release upload "$TAG" "$1" --clobber && return 0
-              sleep 10
-            done
-            return 1
-          }
-          for f in dist/mc_dualstack_check_linux_* dist/deploy.tar.gz; do upload "$f"; done
-          upload dist/SHA256SUMS
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RID/assets?per_page=100" --jq '.[].id' |
+            while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id"; done
+          gh release upload "$TAG" dist/mc_dualstack_check_linux_* dist/deploy.tar.gz
+          gh release upload "$TAG" dist/SHA256SUMS
