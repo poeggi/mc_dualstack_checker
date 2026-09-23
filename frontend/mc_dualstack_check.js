@@ -59,7 +59,7 @@ function formatQueried(ts) {
 }
 function formatCacheExpiry(exp) {
     var sec = exp - Math.floor(Date.now() / 1000);
-    if (sec <= 0) return "fresh now";
+    if (sec <= 0) return "can refresh now";
     if (sec < 60) return "can refresh in " + sec + "s";
     var min = Math.floor(sec / 60), s = sec % 60;
     return "can refresh in " + min + "m" + (s ? " " + s + "s" : "");
@@ -305,8 +305,8 @@ function el(tag, cls, text) {
 }
 function row(key, valueNode, dim) {
     var r = el("div", "ip-row");
-    r.appendChild(el("span", "ip-row-key", key));
-    var v = el("span", "ip-row-val" + (dim ? " dim" : ""));
+    r.appendChild(el("span", "ip-row-key text-label", key));
+    var v = el("span", "ip-row-val" + (dim ? " text-dim" : ""));
     if (typeof valueNode === "string") v.textContent = valueNode; else v.appendChild(valueNode);
     r.appendChild(v);
     return r;
@@ -314,7 +314,7 @@ function row(key, valueNode, dim) {
 function portList(ports, used) {
     var frag = document.createDocumentFragment();
     ports.forEach(function (p, i) {
-        frag.appendChild(el("span", p === used ? "port-used" : "port-struck", String(p)));
+        frag.appendChild(el("span", p === used ? "port-used text-strong" : "port-struck", String(p)));
         if (i < ports.length - 1) frag.appendChild(document.createTextNode(" "));
     });
     return frag;
@@ -325,8 +325,8 @@ var cardCounter = 0;
 function ipCard(r, label) {
     var state = r.state;
     var cls = state === "online" ? "online" : state === "offline" || state === "unreachable" ? "offline" : "unknown";
-    var card = el("div", "ip-card " + cls);
-    var head = el("div", "ip-card-head");
+    var card = el("div", "card ip-card " + cls);
+    var head = el("div", "ip-card-head text-strong");
     head.appendChild(el("span", "", label));
     var badges = el("span", "badge-group");
     if (state === "online" || state === "offline" || state === "unreachable" || state === "no_route") {
@@ -340,7 +340,7 @@ function ipCard(r, label) {
     badges.appendChild(el("span", "badge " + cls, badgeText));
     head.appendChild(badges);
     card.appendChild(head);
-    if (r.ip) card.appendChild(el("div", "ip-resolved", r.ip));
+    if (r.ip) card.appendChild(el("div", "ip-resolved text-small text-muted", r.ip));
 
     var rows = el("div", "ip-rows");
     card.appendChild(rows);
@@ -367,7 +367,7 @@ function ipCard(r, label) {
             rows.appendChild(extraWrap);
             var toggle = el("label", "ip-row ip-row-toggle");
             toggle.htmlFor = id;
-            var tl = el("span", "toggle-label");
+            var tl = el("span", "toggle-label text-small");
             tl.appendChild(el("span", "toggle-more", "\u25BC More"));
             tl.appendChild(el("span", "toggle-less", "\u25B2 Less"));
             toggle.appendChild(tl);

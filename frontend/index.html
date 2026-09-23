@@ -16,27 +16,27 @@
 
     <header class="header">
         <img src="favicon.svg" width="16" height="16" alt="" aria-hidden="true">
-        <h1>MC Server Dualstack Check</h1>
+        <h1 class="text-title">MC Server Dualstack Check</h1>
     </header>
 
     <div class="card">
         <div class="card-body">
-            <form method="get" id="mcform" autocomplete="on">
+            <form class="form" method="get" id="mcform" autocomplete="on">
                 <div class="form-row">
-                    <div class="field">
-                        <label for="f-host">HOSTNAME | IP ADDRESS</label>
+                    <div class="field field-wide">
+                        <label class="text-label text-strong" for="f-host">Hostname | IP address</label>
                         <input name="host" id="f-host" placeholder="e.g. play.example.com" autocapitalize="none" autocorrect="off" spellcheck="false">
                     </div>
-                    <div class="field field-indent">
-                        <label for="f-port4">IPv4 PORT</label>
+                    <div class="field">
+                        <label class="text-label text-strong" for="f-port4">IPv4 port</label>
                         <input name="port4" id="f-port4" placeholder="19132" inputmode="numeric">
                     </div>
-                    <div class="field field-indent">
-                        <label for="f-port6">IPv6 PORT</label>
+                    <div class="field">
+                        <label class="text-label text-strong" for="f-port6">IPv6 port</label>
                         <input name="port6" id="f-port6" placeholder="as IPv4" inputmode="numeric">
                     </div>
-                    <div class="field field-indent">
-                        <label for="f-edition">EDITION</label>
+                    <div class="field">
+                        <label class="text-label text-strong" for="f-edition">Edition</label>
                         <select name="edition" id="f-edition">
                             <option value="bedrock" selected>Bedrock</option>
                             <option value="java">Java</option>
@@ -48,7 +48,7 @@
                         <input type="checkbox" id="f-nofallback" name="nofallback" value="1">
                         Disable port fallback
                     </label>
-                    <button type="submit" id="f-submit">Check</button>
+                    <button class="text-strong" type="submit" id="f-submit">Check</button>
                 </div>
             </form>
         </div>
@@ -57,25 +57,25 @@
     <div class="notice-warn" id="notice-backend" role="status" hidden></div>
     <div class="notice-error" id="notice" role="alert" hidden></div>
 
-    <div class="checking-indicator" id="checking-indicator" hidden>
+    <div class="checking-indicator text-muted" id="checking-indicator" hidden>
         <span class="checking-spinner"></span>
         <span class="checking-label">Checking&hellip;</span>
     </div>
 
 </div><!-- /.page -->
 
-<div class="page page-results" id="results" hidden>
-    <div class="query-time" id="query-time">
+<div class="page" id="results" hidden>
+    <div class="query-time text-muted" id="query-time">
         <span id="time-ago"></span>
     </div>
     <div class="ip-grid" id="ip-grid"></div>
     <div class="card debug-card" id="debug-card" hidden>
-        <div class="card-head">Debug Log</div>
-        <div class="debug-log" id="debug-log"></div>
+        <div class="card-head text-label text-strong">Debug log</div>
+        <div class="debug-log text-muted" id="debug-log"></div>
     </div>
-</div><!-- /.page-results -->
+</div><!-- /results -->
 
-<footer class="site-footer">
+<footer class="site-footer text-tiny text-muted">
     No queries are logged or stored beyond standard server access logs.<br>
     Version <span id="version">dev</span>. <a href="https://github.com/poeggi/mc_dualstack_checker">AGPL-3.0</a>.
 </footer>
