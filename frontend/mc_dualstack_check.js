@@ -10,6 +10,9 @@ var CACHE_TTL = 60;
 // Up to this age of the backend's copy, the page answers a probe itself:
 // half the backend's cache time.
 var REUSE_SECONDS = CACHE_TTL / 2;
+// Milliseconds the page takes to give such an answer, so the check still
+// shows its brief loading state.
+var REUSE_DELAY_MS = 100;
 // Seconds the page keeps the backend's health, per tab and release.
 var HEALTH_SECONDS = 30;
 // Default ports per edition. Bedrock servers commonly listen on 19133 for
@@ -259,7 +262,9 @@ function ping(params) {
             if (age < REUSE_SECONDS) {
                 kept.r.cached = true;
                 kept.r.age_s = age;
-                return Promise.resolve(kept.r);
+                return new Promise(function (resolve) {
+                    setTimeout(function () { resolve(kept.r); }, REUSE_DELAY_MS);
+                });
             }
         }
     } catch (e) {}
