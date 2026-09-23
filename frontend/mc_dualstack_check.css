@@ -170,20 +170,14 @@ button:hover { opacity: .88; }
 
 /* Button while a check runs: dimmed, with a spinner that fades out. */
 button:active,
-button:focus:not(:focus-visible),
-button:focus-visible:active,
 button.btn-active {
     opacity: .45;
     cursor: not-allowed;
 }
-button:focus:not(:focus-visible),
-button:focus-visible:active,
 button.btn-active {
     position: relative;
     padding-right: 2.2rem;
 }
-button:focus:not(:focus-visible)::after,
-button:focus-visible:active::after,
 button.btn-active::after {
     content: "";
     position: absolute;
