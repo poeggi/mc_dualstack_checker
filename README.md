@@ -12,7 +12,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what the frontend cannot. It holds no state, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The backend must run on a host with real IPv6 egress. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
@@ -50,7 +50,7 @@ cd backend && go run .
 cd frontend && php -S localhost:8000 api.php
 ```
 
-`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. PHP runs there as CGI, which needs `Options +ExecCGI`.
+`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
 `frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it.
 
@@ -82,7 +82,7 @@ This installs the backend as a systemd service (user `mcdc`, port 8080 on loopba
 
 - It keeps Caddy at the version pinned in the script.
 - It installs the latest GitHub release whenever its `SHA256SUMS` changes, so a release published again under the same tag counts too. That covers the backend binary and, from `deploy.tar.gz`, the Caddy config, the landing page, the systemd units and `mcdc-tick` itself. Outbound only, no deploy credentials.
-- It keeps the CPU busy for 30 s, about 7 % average load. Some free-tier clouds reclaim VMs whose CPU looks idle for days. `BUSY_SECONDS=0` in the unit's environment turns this off.
+- It keeps the CPU busy for 30 s, about 7 % average load. Some free-tier clouds reclaim VMs whose CPU looks idle for days. To turn this off, set `Environment=BUSY_SECONDS=0` in a drop-in (`systemctl edit mcdc-tick`); releases replace the unit file itself, not drop-ins.
 
 So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
 

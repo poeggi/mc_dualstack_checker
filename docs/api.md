@@ -4,7 +4,7 @@ The public API is the backend at `https://mcdscheck-api.poggensee.it`. Use it fr
 
 The web interface reaches the backend through its frontend, a relay on the web host (see README).
 
-All responses are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`.
+All answers of `/ping` and `/health` are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`.
 
 ## `GET /ping`
 
@@ -15,7 +15,7 @@ GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java
 
 One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. `edition` defaults to `bedrock`.
 
-With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. Without `ip`, the backend resolves `host` and probes its first address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
+With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. Without `ip`, the backend resolves `host` and probes its first public address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
 
 `host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
@@ -25,7 +25,7 @@ Internal addresses in `ip` answer `400`: loopback, unspecified, link-local, RFC 
 
 Name lookups reveal nothing internal. These answer `no_dns`, exactly like a name without a record:
 
-- Names that are never looked up: single labels, `localhost`, and names under `.local`, `.internal`, `.lan`, `.home`, `.corp`, `.localdomain`, `.intranet`, `.private`, `.arpa`, `.test`, `.example`, `.invalid` or the checker host's own DNS search domains.
+- Names that are never looked up: single labels, `localhost`, and names under `.localhost`, `.local`, `.internal`, `.lan`, `.home`, `.corp`, `.localdomain`, `.intranet`, `.private`, `.arpa`, `.test`, `.example`, `.invalid` or the checker host's own DNS search domains.
 - Names whose records in `family` are all internal addresses.
 
 Names are looked up as absolute names, so the checker host's search domains are never appended.

@@ -9,7 +9,8 @@
 #      key, nothing connects into the VM.
 #   3. Keep the CPU busy for BUSY_SECONDS (default 30 s, about 7 % average
 #      load). Some free-tier clouds reclaim VMs whose CPU looks idle for
-#      days; BUSY_SECONDS=0 in the unit's environment turns this off.
+#      days. BUSY_SECONDS=0 in a drop-in (systemctl edit mcdc-tick) turns
+#      this off; releases replace the unit file, not drop-ins.
 set -eu
 
 REPO="poeggi/mc_dualstack_checker"
