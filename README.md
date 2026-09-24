@@ -69,9 +69,10 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 Both workflows run on a published GitHub release.
 
-### Backend (a Linux VM with systemd)
+### Backend (Linux VM with systemd)
 
-The backend needs a host with native IPv4 and IPv6 egress: a public IPv4 and a global IPv6 address. It runs as `mcdscheck-api.poggensee.it`, the name in `deploy/Caddyfile`.
+The backend needs a host with native IPv4 and IPv6 egress: a public IPv4 and a global IPv6 address. 
+A live instance of the service runs as `mcdscheck-api.poggensee.it`.
 
 One-time setup on the VM, with git installed:
 
