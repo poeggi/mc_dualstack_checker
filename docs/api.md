@@ -58,7 +58,7 @@ Names are looked up as absolute names, so the checker host's search domains are 
 | `state` | `online`, `offline`, `unreachable`, `no_route`, `no_dns` or `dns_error`, see below |
 | `ip` | the probed address |
 | `rtt_ms` | round trip of the probe, `online` only |
-| `error` | short reason, all states but `online` and `no_dns`: `timeout`, `connection refused (port closed)`, `connection reset`, `no route to host (rejected by a router or firewall, ICMP unreachable)`, `invalid reply: ...`, `lookup failed` and similar |
+| `error` | short reason, all states but `online` and `no_dns`, see below |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `info` | server data; `gamemode`, `map`, `server_id` are Bedrock only; formatting codes are stripped from `motd` and `map` |
 
@@ -70,6 +70,13 @@ States:
 - `no_route`: the checker host itself has no connectivity for this address family.
 - `no_dns`: `host` has no record in `family`. Name lookups only.
 - `dns_error`: resolving `host` failed. Name lookups only.
+
+`error` per state:
+
+- `offline`: `no response (timeout)`, `refused (port closed)`, `refused (reset)`, `refused (closed)`, `invalid data (<detail>)` such as `invalid data (bad raknet magic)`, or `failed (unknown error)`.
+- `unreachable`: `rejected (no route to host)`, `rejected (host unknown)`, `rejected (prohibited)` or `rejected (network unreachable)`.
+- `no_route`: `network unreachable`, `no source address` or `family not supported`.
+- `dns_error`: `timeout` or `error`.
 
 ## `GET /health`
 

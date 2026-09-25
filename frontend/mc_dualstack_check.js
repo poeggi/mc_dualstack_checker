@@ -187,15 +187,14 @@ function literalIP(host) {
 // later ports reuse the address it returned.
 function checkFamily(fam, target, ports, edition, log) {
     var family = "IPv" + fam, record = fam === 4 ? "A" : "AAAA";
-    var result = { state: "offline", ip: target.ip || "", ports_tried: [] };
+    var result = { state: "offline", ip: target.ip || "", ports_tried: [], statuses: [] };
     function tryPort(i) {
         if (i >= ports.length) {
             if (result.rejected) {
                 log.push("UNREACHABLE: " + family + " was rejected on the way");
                 result.state = "unreachable";
-                result.reason = result.rejected;
             } else {
-                log.push("OFFLINE: " + family + " did not respond on any port");
+                log.push("OFFLINE: " + family + " no server on any port");
             }
             return result;
         }
@@ -212,7 +211,7 @@ function checkFamily(fam, target, ports, edition, log) {
             }
             if (r.state === "dns_error") {
                 log.push("ERROR: " + family + " lookup failed: " + (r.error || "unknown"));
-                return { state: "dns_error", reason: record + " lookup failed" };
+                return { state: "dns_error", reason: record + " lookup failed (" + (r.error || "error") + ")" };
             }
             if (!result.ip && r.ip) {
                 result.ip = r.ip;
@@ -229,12 +228,14 @@ function checkFamily(fam, target, ports, edition, log) {
             if (r.state === "no_route") {
                 log.push("ERROR: checker has no " + family + " connectivity: " + r.error);
                 result.state = "no_route";
-                result.reason = "The checker host has no " + family + " connectivity";
+                result.reason = "The checker host has no " + family + " connectivity" + (r.error ? " (" + r.error + ")" : "");
                 result.cached = r.cached; result.age_s = r.age_s;
                 return result;
             }
-            log.push(family + " port " + port + ": " + (r.error || "no response"));
-            if (r.state === "unreachable") result.rejected = r.error || "rejected";
+            var reason = r.error || "no response";
+            log.push(family + " port " + port + ": " + reason);
+            result.statuses.push({ port: port, text: reason.charAt(0).toUpperCase() + reason.slice(1) });
+            if (r.state === "unreachable") result.rejected = true;
             result.cached = r.cached; result.age_s = r.age_s;
             return tryPort(i + 1);
         });
@@ -392,6 +393,16 @@ function portList(ports, used) {
     return frag;
 }
 
+// One line per port tried, naming the port when there are several.
+function statusLines(statuses) {
+    var frag = document.createDocumentFragment();
+    statuses.forEach(function (s, i) {
+        if (i > 0) frag.appendChild(document.createElement("br"));
+        frag.appendChild(document.createTextNode(statuses.length > 1 ? s.port + ": " + s.text : s.text));
+    });
+    return frag;
+}
+
 var cardCounter = 0;
 
 function ipCard(r, label) {
@@ -406,8 +417,8 @@ function ipCard(r, label) {
     }
     if (state === "online" && r.ports_tried.length > 1) badges.appendChild(el("span", "badge fallback", "Fallback"));
     var badgeText = {
-        online: "Online", offline: "Offline", unreachable: "Unreachable", no_dns: "No DNS record",
-        dns_error: "DNS error", omitted: "Omitted", no_route: "Unavailable"
+        online: "Online", offline: "Offline", unreachable: "Unreachable", no_dns: "No DNS",
+        dns_error: "No DNS", omitted: "Omitted", no_route: "Unavailable"
     }[state] || state;
     badges.appendChild(el("span", "badge " + cls, badgeText));
     head.appendChild(badges);
@@ -445,12 +456,8 @@ function ipCard(r, label) {
             toggle.appendChild(tl);
             rows.appendChild(toggle);
         }
-    } else if (state === "offline") {
-        rows.appendChild(row("Status", "No response", true));
-        rows.appendChild(row("Ports tried", portList(r.ports_tried, -1)));
-    } else if (state === "unreachable") {
-        rows.appendChild(row("Status", "Rejected on the way", true));
-        rows.appendChild(row("Reason", r.reason || "", true));
+    } else if (state === "offline" || state === "unreachable") {
+        rows.appendChild(row("Status", statusLines(r.statuses), true));
         rows.appendChild(row("Ports tried", portList(r.ports_tried, -1)));
     } else {
         rows.appendChild(row("Info", r.reason || "", true));

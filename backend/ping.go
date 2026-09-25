@@ -31,7 +31,8 @@ type ServerInfo struct {
 // State is one of:
 //
 //	online      - the server answered
-//	offline     - no answer, or the server itself refused the port
+//	offline     - no valid answer: silence, a refusal by the host, or data
+//	              that is not a Minecraft status
 //	unreachable - a router or firewall on the way rejected the probe
 //	no_route    - this host has no connectivity for the address family
 //	no_dns      - the host name has no record in the requested family
@@ -96,15 +97,11 @@ func clip(s string, n int) string {
 
 // failure is the result of a probe of ip that failed with err.
 func failure(err error, ip net.IP) PingResult {
-	switch {
-	case localNoRoute(err, ip):
-		return PingResult{State: "no_route", Error: describe(err)}
-	case rejected(err):
-		msg := describe(err)
-		if errors.Is(err, syscall.ENETUNREACH) {
-			msg += " (rejected by a router, ICMP unreachable)"
-		}
-		return PingResult{State: "unreachable", Error: msg}
+	if localNoRoute(err, ip) {
+		return PingResult{State: "no_route", Error: noRouteReason(err)}
+	}
+	if r := rejection(err); r != "" {
+		return PingResult{State: "unreachable", Error: "rejected (" + r + ")"}
 	}
 	return PingResult{State: "offline", Error: describe(err)}
 }
@@ -133,50 +130,54 @@ func localNoRoute(err error, ip net.IP) bool {
 	return false
 }
 
-// rejected reports whether something other than the probed host refused
-// the probe: a router or firewall answering with ICMP unreachable or
-// administratively prohibited.
-func rejected(err error) bool {
-	for _, e := range []error{syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.EHOSTDOWN,
-		syscall.ENONET, syscall.EACCES, syscall.EPERM} {
-		if errors.Is(err, e) {
-			return true
-		}
+// noRouteReason names why this host cannot use the family, for an error
+// localNoRoute accepted.
+func noRouteReason(err error) string {
+	switch {
+	case errors.Is(err, syscall.EADDRNOTAVAIL):
+		return "no source address"
+	case errors.Is(err, syscall.EAFNOSUPPORT):
+		return "family not supported"
 	}
-	return false
+	return "network unreachable"
 }
 
-// describe turns a probe error into a short reason that does not depend on
-// how the backend is implemented.
+// rejection names how something other than the probed host refused the
+// probe, a router or firewall answering with ICMP unreachable or
+// administratively prohibited. It is "" for other errors.
+func rejection(err error) string {
+	switch {
+	case errors.Is(err, syscall.EHOSTUNREACH):
+		return "no route to host"
+	case errors.Is(err, syscall.EHOSTDOWN), errors.Is(err, syscall.ENONET):
+		return "host unknown"
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return "prohibited"
+	case errors.Is(err, syscall.ENETUNREACH):
+		return "network unreachable"
+	}
+	return ""
+}
+
+// describe turns the error of a probe that got no valid answer into
+// "<outcome> (<detail>)", independent of how the backend is implemented.
 func describe(err error) string {
 	var pe probeError
 	var ne net.Error
 	switch {
 	case errors.As(err, &pe):
-		return "invalid reply: " + string(pe)
+		return "invalid data (" + string(pe) + ")"
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled),
 		errors.Is(err, os.ErrDeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
-		return "timeout"
+		return "no response (timeout)"
 	case errors.Is(err, syscall.ECONNREFUSED):
-		return "connection refused (port closed)"
-	case errors.Is(err, syscall.EHOSTUNREACH):
-		return "no route to host (rejected by a router or firewall, ICMP unreachable)"
-	case errors.Is(err, syscall.EHOSTDOWN), errors.Is(err, syscall.ENONET):
-		return "host unknown (rejected by a router, ICMP unreachable)"
-	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
-		return "permission denied (rejected by a firewall, ICMP administratively prohibited)"
+		return "refused (port closed)"
 	case errors.Is(err, syscall.ECONNRESET):
-		return "connection reset"
+		return "refused (reset)"
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-		return "connection closed"
-	case errors.Is(err, syscall.ENETUNREACH):
-		return "network unreachable"
-	case errors.Is(err, syscall.EADDRNOTAVAIL):
-		return "no source address for this family"
-	case errors.Is(err, syscall.EAFNOSUPPORT):
-		return "address family not supported"
+		return "refused (closed)"
 	}
-	return "probe failed"
+	return "failed (unknown error)"
 }
 
 // stripFormatting removes Minecraft "section sign" colour codes.

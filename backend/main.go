@@ -183,7 +183,7 @@ func lookupReason(err error) string {
 	if errors.As(err, &dnsErr) && dnsErr.IsTimeout {
 		return "timeout"
 	}
-	return "lookup failed"
+	return "error"
 }
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
