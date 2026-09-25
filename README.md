@@ -16,7 +16,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a small helper on the web host. The browser talks only to the web host and to the API, never to third parties. The API sees visitors' addresses. Minecraft server names are looked up by the backend only, never in the browser. Changing behaviour means editing the page, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps a short in-memory result cache, the rate limits and anonymous usage counts: no stored addresses, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a small helper on the web host. The browser talks only to the web host and to the API, never to third parties. The API sees visitors' addresses. Minecraft server names are looked up by the backend only, never in the browser. Changing behaviour means editing the page, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The public backend runs on a host with native IPv4 and IPv6 egress. If you deploy your own, make sure its host has both. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
@@ -31,7 +31,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## API
 
-The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once.
+The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once. Anonymous usage numbers are at `/stats` on the API host.
 
 The page sends its probes straight to the API. The helper on the web host answers at `api/<endpoint>`:
 
@@ -96,7 +96,7 @@ This installs the backend as a systemd service (user `mcdc`, port 8080 on loopba
 
 So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
 
-Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
+Caddy serves the API publicly, plus a landing page and the usage page from `deploy/www/`. It serves the backend's `stats.json` from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
 
 The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the VM's deploy files into `deploy.tar.gz`, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
 

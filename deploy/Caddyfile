@@ -6,8 +6,8 @@ mcdscheck-api.poggensee.it {
 	root * /var/www/mcdc
 	header -Server
 	header -Via
-	# The landing page loads only its own stylesheet and icon.
-	header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'"
+	# The pages load only this host's own files.
+	header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 	@api path /ping /health
 	handle @api {
 		reverse_proxy 127.0.0.1:8080 {
@@ -17,7 +17,14 @@ mcdscheck-api.poggensee.it {
 			trusted_proxies 2a01:4f8:d0a:52d1::2/128 88.198.28.140/32
 		}
 	}
+	# The backend replaces stats.json once a minute; see backend/stats.go.
+	handle /stats.json {
+		root * /var/lib/mc-dualstack-check
+		header Cache-Control "public, max-age=60"
+		file_server
+	}
 	handle {
+		rewrite /stats /stats.html
 		header Cache-Control "public, max-age=86400"
 		file_server
 	}

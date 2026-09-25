@@ -12,11 +12,12 @@ cd "$(dirname "$0")/../backend" || exit 1
 PORT=${PORT:-8089}
 B="http://127.0.0.1:$PORT"
 F="http://127.0.0.1:$((PORT + 1))"
-PORT=$PORT FILTER_INTERNAL_TARGETS=false go run . >/dev/null 2>&1 &
+STATS=$(mktemp -d)
+PORT=$PORT FILTER_INTERNAL_TARGETS=false STATE_DIRECTORY=$STATS go run . >/dev/null 2>&1 &
 pid=$!
 PORT=$((PORT + 1)) go run . >/dev/null 2>&1 &
 fpid=$!
-trap 'kill $pid $fpid 2>/dev/null' EXIT
+trap 'kill $pid $fpid 2>/dev/null; rm -rf "$STATS"' EXIT
 for u in "$B" "$F"; do
     for i in $(seq 1 60); do curl -fsS "$u/health" >/dev/null 2>&1 && break; sleep 1; done
 done
@@ -35,6 +36,7 @@ json() { curl -s -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1" | "$PY" -c "
 
 echo "== endpoints"
 check "health"                      json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
+check "usage numbers written at start" "$PY" -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if all(k in d for k in ('minutes','hours','days','months')) else 1)" "$STATS/stats.json"
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400

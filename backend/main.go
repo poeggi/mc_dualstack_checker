@@ -10,7 +10,8 @@
 //	GET /health
 //
 // Listens on loopback only; Caddy in front is the public side.
-// Environment: PORT, ALLOWED_ORIGINS, FILTER_INTERNAL_TARGETS (default true).
+// Environment: PORT, ALLOWED_ORIGINS, FILTER_INTERNAL_TARGETS (default true),
+// STATE_DIRECTORY (set by systemd; where the usage numbers are written).
 package main
 
 import (
@@ -23,9 +24,11 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -65,6 +68,22 @@ func main() {
 			cache.sweep()
 			limits.sweep()
 		}
+	}()
+
+	statsDir := os.Getenv("STATE_DIRECTORY")
+	stop, done := make(chan struct{}), make(chan struct{})
+	go runStats(loadUsage(statsDir), statsDir, stop, done)
+	// On stop or restart the usage numbers are written once more.
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, os.Interrupt)
+		<-sig
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+		os.Exit(0)
 	}()
 
 	mux := http.NewServeMux()
@@ -236,9 +255,11 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	if system == "" {
 		system = ip.String()
 	}
-	if wait, reason := limits.admitProbe(clientKey(r), system); limited(w, wait, reason) {
+	client := clientKey(r)
+	if wait, reason := limits.admitProbe(client, system); limited(w, wait, reason) {
 		return
 	}
+	countPing(client)
 
 	if ip == nil {
 		// A lookup takes one of the in-flight slots while it runs.

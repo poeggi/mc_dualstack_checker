@@ -84,6 +84,25 @@ States:
 
 The backend refreshes this status every 7 seconds. A request returns the last result. `ipv6` reports whether the host has a global IPv6 address; the page warns when it is false.
 
+## Usage statistics
+
+`/stats` is a page with charts, `/stats.json` the numbers behind it. The backend writes `stats.json` into its state directory once a minute, and the reverse proxy serves it as a static file, so reading it costs the backend nothing.
+
+Counted are `/ping` requests that pass the limits, and unique clients, each for IPv4 and IPv6 clients. A client is an IPv4 address or the /64 of an IPv6 address. Unique clients are HyperLogLog estimates, within about 2 %; no addresses are stored. Kept are the last 60 minutes, 24 hours, 30 days and 12 months, in UTC.
+
+```json
+{
+  "updated": "2026-09-25T12:00:00Z",
+  "minutes": [
+    {"start": "2026-09-25T11:59:00Z", "current": true, "ipv4": {"requests": 7, "clients": 3}, "ipv6": {"requests": 4, "clients": 2}},
+    {"start": "2026-09-25T11:58:00Z", "ipv4": {"requests": 12, "clients": 5}, "ipv6": {"requests": 0, "clients": 0}}
+  ],
+  "hours": [], "days": [], "months": []
+}
+```
+
+Each list starts with the running period, marked `"current": true`, followed by the finished ones.
+
 ## Caching
 
 Probe results are cached for 60 seconds per `edition`, address and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
@@ -104,4 +123,4 @@ At most 10000 clients and 10000 cached results are kept. Beyond that, new client
 
 ## Running your own
 
-The backend listens on `127.0.0.1` only; put a reverse proxy in front of it. It reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses and internal answers of name lookups, for tests against local servers. Local names such as `.lan` are still never looked up; use the server's IP address.
+The backend listens on `127.0.0.1` only; put a reverse proxy in front of it. It reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any), `STATE_DIRECTORY` (where the usage numbers go; systemd sets it) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses and internal answers of name lookups, for tests against local servers. Local names such as `.lan` are still never looked up; use the server's IP address.
