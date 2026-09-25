@@ -4,9 +4,9 @@ The API is the backend. A live instance runs at `https://mcdscheck-api.poggensee
 
 NOTE: The live instance at poggensee.it is free to use for non-commercial users or purposes only.
 
-The web interface reaches the backend through its frontend, a relay on the web host (see README).
+The web interface sends its probes to the API directly from the browser. It reads the API's health through its web host (see README).
 
-All answers of `/ping` and `/health` are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`. The live instance also serves its landing page at `/`.
+All answers of `/ping` and `/health` are JSON with `Cache-Control: no-store`. Errors are `{"error": "<message>"}` with a 4xx/5xx status. Cross-origin pages can read `Retry-After`. `/ping` and `/health` answer methods other than GET and HEAD with `405`. Other paths answer `404`. The live instance also serves its landing page at `/`.
 
 ## `GET /ping`
 
@@ -90,7 +90,7 @@ Probe results are cached for 60 seconds per `edition`, address and `port`, onlin
 
 ## Limits
 
-Per client address: an IPv4 address, or the /64 of an IPv6 address. Direct callers are charged for their own address, the web interface for the address its host forwards.
+Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are charged for their own address, so visitors of the web interface for theirs. When the web interface's host passes a request on, it forwards the visitor's address.
 
 - **Distinct systems.** More than 10 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
 - **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.

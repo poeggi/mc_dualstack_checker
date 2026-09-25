@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 
-// Whether the relay has a backend configured, and the page's release,
-// read once at startup.
+// The API's base URL ("" when none is configured) and the page's release,
+// read once at startup from the web host.
+var apiBase = "";
 var backendReady = false;
 var pageVersion = "";
 // Seconds the backend caches a probe result.
@@ -150,13 +151,15 @@ function fillForm(q) {
     port6El.placeholder = q.port4 || "as IPv4";
 }
 
-// -- Relay -------------------------------------------------------
-// Every call goes to api/<endpoint> on this host, which relays it to the
-// backend. Errors are thrown as { rateLimited, retry } | { unreachable } |
+// -- API ---------------------------------------------------------
+// Probes go straight to the API at apiBase. config and health come from
+// api/<endpoint> on this host, which keeps one copy of the API's health.
+// Errors are thrown as { rateLimited, retry } | { unreachable } |
 // { message }.
 function api(endpoint, params) {
     var q = new URLSearchParams(params || {}).toString();
-    return fetch("api/" + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
+    var base = endpoint === "ping" ? apiBase + "/" : "api/";
+    return fetch(base + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
         function (res) {
             return res.json().catch(function () { return {}; }).then(function (body) {
                 if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
@@ -344,7 +347,12 @@ function runCheck(q) {
         if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
         setBusy(false);
         if (err && err.unreachable) {
-            showNotice("Cannot reach the checker backend. Try again shortly.");
+            // The web host's view of the API tells the two cases apart.
+            api("health").then(function () {
+                showNotice("The API is online, but your browser cannot reach it.");
+            }, function () {
+                showNotice("API unavailable.");
+            });
         } else {
             showNotice(err && err.message ? err.message : "Check failed.");
         }
@@ -522,7 +530,8 @@ function backendNotice(msg) {
 }
 
 api("config").then(function (cfg) {
-    backendReady = !!cfg.backend;
+    apiBase = typeof cfg.backend === "string" ? cfg.backend : "";
+    backendReady = apiBase !== "";
     pageVersion = cfg.version || "";
     if (cfg.version) $("version").textContent = cfg.version;
 }, function () {
@@ -533,5 +542,7 @@ api("config").then(function (cfg) {
     loadHealth().then(function (h) {
         if (h.version) $("version").textContent += ", API " + h.version;
         if (h.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
-    }).catch(function () {});
+    }, function () {
+        $("version").textContent += ", API unavailable";
+    });
 });

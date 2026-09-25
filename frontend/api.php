@@ -1,15 +1,14 @@
 <?php
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Same-origin relay for the page. The browser never talks to anything but
-// this host; this script passes each call on to the backend. config.php
-// sets:
-//   MC_BACKEND   base URL of the backend, "" when none is configured
+// Same-origin helper for the page: it tells the page where the API is and
+// keeps one copy of the API's health. The page sends probes to the API
+// itself. config.php sets:
+//   MC_BACKEND   base URL of the API, "" when none is configured
 //   MC_VERSION   release tag of the deployed page
 //
 // .htaccess maps api/<endpoint> here; the endpoint is the last path segment.
-//   api/config   -> {"backend": true|false, "version": ...}
-//   api/ping     -> the backend's /ping, see docs/api.md
-//   api/health   -> the backend's /health, one copy for all visitors
+//   api/config   -> {"backend": "<API URL>" | "", "version": ...}
+//   api/health   -> the API's /health, one copy for all visitors
 //
 // Also the router for the built-in development server: other paths are
 // served as static files, scripts excepted.
@@ -124,19 +123,8 @@ function health(): never {
 
 switch (basename($path)) {
 case 'config':
-    echo json_encode(['backend' => MC_BACKEND !== '', 'version' => MC_VERSION]);
+    echo json_encode(['backend' => rtrim(MC_BACKEND, '/'), 'version' => MC_VERSION], JSON_UNESCAPED_SLASHES);
     break;
-
-case 'ping':
-    // Only the backend's own parameters, as plain strings; it validates them.
-    $params = [];
-    foreach (['ip', 'host', 'family', 'port', 'edition'] as $name) {
-        $v = $_GET[$name] ?? '';
-        if (is_string($v) && $v !== '') {
-            $params[$name] = $v;
-        }
-    }
-    relay('ping', $params);
 
 case 'health':
     health();

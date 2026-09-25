@@ -16,14 +16,14 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a small helper on the web host. The browser talks only to the web host and to the API, never to third parties. The API sees visitors' addresses. Minecraft server names are looked up by the backend only, never in the browser. Changing behaviour means editing the page, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The public backend runs on a host with native IPv4 and IPv6 egress. If you deploy your own, make sure its host has both. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
 ## Layout
 
 - `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. One static binary.
-- `frontend/` - the page plus its relay to the backend. `.htaccess` sets up the web host.
+- `frontend/` - the page plus its helper `api.php` for the web host. `.htaccess` sets up the web host.
 - `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
@@ -33,22 +33,23 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once.
 
-The browser only ever talks to the web host. The frontend relay is there for the page. It answers at `api/<endpoint>`:
+The page sends its probes straight to the API. The helper on the web host answers at `api/<endpoint>`:
 
-- `api/config`: `{"backend": true | false, "version": "..."}`, whether a backend is configured and the release.
-- `api/ping`: passed to the backend at `MC_BACKEND` with the client's address, the answer and status code unchanged. Only the parameters of `/ping` are passed on.
+- `api/config`: `{"backend": "<API URL>" | "", "version": "..."}`, the API the page uses (empty when none is configured) and the release.
 - `api/health`: one copy of the backend's `/health` for all visitors, refreshed at most every 7 s and asked for as the web host. Visitors' reloads do not count against the backend's health limit. Without a usable cache file, each request is passed on.
 
-The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It looks up no server names itself.
+The helper answers `404` for unknown endpoints, `502` when the API is unreachable and `503` when none is configured. It looks up no server names itself.
+
+When a probe cannot reach the API, the page asks `api/health` again. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it." The footer shows the API version, or "API unavailable".
 
 Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state. The page keeps the backend's health for 30 s per tab.
 
 ## Development and build
 
-The backend is written in Go. The frontend relay is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain JavaScript.
+The backend is written in Go. The web host helper is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain JavaScript.
 
 ```bash
-cd backend && go run .
+cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
 ```
 
 ```bash
@@ -57,7 +58,7 @@ cd frontend && php -S localhost:8000 api.php
 
 `api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
-`frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it.
+`frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it. The page sends probes to that address from the browser, so the backend must allow the page's origin in `ALLOWED_ORIGINS`.
 
 The backend listens on `127.0.0.1` only. It does not probe internal addresses. To check a server on the local network, start it with `FILTER_INTERNAL_TARGETS=false`. Local names such as `.lan` still stay unresolved; use the server's IP address.
 
@@ -65,9 +66,9 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 - `cd backend && go test ./...` checks how failed probes are classified, the chat nesting limit and text clipping.
 - `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits.
+- `sh test/live.sh` checks a deployed web interface and API end to end. It reads `WEB` (page URL), `API` (API URL), `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server) and `LIVE_JAVA_HOST` (a Java server). Each part runs only when its setting is given.
 
-CI runs both on pushes to main and on pull requests.
-- `sh test/live.sh` checks the deployed web interface and API end to end (hostnames, IPv4 and IPv6 literals, Bedrock and Java, versions). The "Live check" workflow runs it after each frontend deploy, once it sees the released version on the VM, plus daily and on demand.
+CI runs the first two on pushes to main and on pull requests. The "Live check" workflow runs `test/live.sh` after each frontend deploy, once it sees the released version on the VM, plus daily and on demand. It takes `WEB` from the variable `LIVE_URL`, `API` from the variable `MC_BACKEND`, and the two server names from secrets of the same names.
 
 ## Deployment
 
@@ -102,7 +103,9 @@ The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the 
 ### Frontend (FTPS to the web host)
 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
-Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at the target folder), `MC_BACKEND` (backend URL; empty disables checks), `LIVE_URL` (optional, the page URL with a trailing slash, verifies the upload).
+Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at the target folder), `MC_BACKEND` (the API URL the page calls; empty disables checks), `LIVE_URL` (optional, the page URL with a trailing slash, verifies the upload).
+
+For the live check, optionally add the secrets `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server that is always up) and `LIVE_JAVA_HOST` (a Java server that is always up). Without them, those checks are skipped.
 
 The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into the frontend config before upload; the page shows the version in the footer.
 

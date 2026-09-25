@@ -357,6 +357,8 @@ func withCORS(allowed []string, next http.HandlerFunc) http.HandlerFunc {
 		origin := r.Header.Get("Origin")
 		if origin != "" && originAllowed(allowed, origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			// The web interface reads it for its 429 countdown.
+			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 			w.Header().Set("Vary", "Origin")
 		}
 		next(w, r)
