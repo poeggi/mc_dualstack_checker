@@ -28,8 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: write the settings into config.php and the page
-        # The values end up inside PHP string literals, HTML attributes and
+      - name: write the settings into the page and api.php
+        # The values end up inside HTML attributes, PHP string literals and
         # sed replacements.
         env:
           MC_BACKEND: ${{ vars.MC_BACKEND }}
@@ -38,13 +38,15 @@ jobs:
           for v in "$MC_BACKEND" "$VERSION"; do
             case "$v" in *[\'\"\\\&\|\<\>]*) echo "unexpected character in a config value" >&2; exit 1 ;; esac
           done
-          printf "<?php\ndefine('MC_BACKEND', '%s');\ndefine('MC_VERSION', '%s');\n" \
-            "$MC_BACKEND" "$VERSION" > frontend/config.php
-          sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"${MC_BACKEND%/}\"|" \
+          API=${MC_BACKEND%/}
+          sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"$API\"|" \
                  -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
                  -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" frontend/index.html
-          cat frontend/config.php
-          grep -F "<body data-api=\"${MC_BACKEND%/}\" data-version=\"$VERSION\">" frontend/index.html
+          sed -i -e "s|^define('MC_BACKEND', '[^']*');|define('MC_BACKEND', '$API');|" \
+                 -e "s|^define('MC_VERSION', '[^']*');|define('MC_VERSION', '$VERSION');|" frontend/api.php
+          grep -F "<body data-api=\"$API\" data-version=\"$VERSION\">" frontend/index.html
+          grep -F "define('MC_BACKEND', '$API');" frontend/api.php
+          grep -F "define('MC_VERSION', '$VERSION');" frontend/api.php
 
       - name: install lftp
         # The runner image carries a Google Chrome apt source whose hash

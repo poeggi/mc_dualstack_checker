@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // This host's view of the backend: one copy of the backend's /health for
 // all visitors. The page asks it once on load, for the footer, and when a
-// probe fails. The page sends probes to the backend itself. config.php sets:
-//   MC_BACKEND   base URL of the backend, "" when none is configured
-//   MC_VERSION   release tag of the deployed page
+// probe fails. The page sends probes to the backend itself.
 //
 // .htaccess maps api/<endpoint> here; the endpoint is the last path segment.
 //   api/backend-health   -> the copy, with its age in the Age header
@@ -21,12 +19,10 @@ header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
-$config = __DIR__ . '/config.php';
-if (is_file($config)) {
-    require $config;
-}
-defined('MC_BACKEND') || define('MC_BACKEND', '');
-defined('MC_VERSION') || define('MC_VERSION', 'dev');
+// The frontend deploy writes the backend's base URL ("" when none is
+// configured) and the release tag into these two lines.
+define('MC_BACKEND', 'http://localhost:8080');
+define('MC_VERSION', 'dev');
 
 // Seconds one call to the backend may take. Two tries stay within
 // HEALTH_TTL.

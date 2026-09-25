@@ -73,7 +73,7 @@ if [ -n "$WEB" ]; then
     check "no probe relay -> 404"   is "$WEB/api/ping?ip=192.0.2.1&port=1" 404
     check "unknown endpoint -> 404" is "$WEB/api/nope" 404
     check "scripts hidden by name"  is "$WEB/api.php" 404
-    check "config hidden by name"   is "$WEB/config.php" 404
+    check "health copy hidden"      is "$WEB/.health.json" 404
 else
     skip "web interface: WEB is not set"
 fi

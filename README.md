@@ -47,7 +47,7 @@ Frontend behaviour: a literal IP skips DNS and omits the other family. A name is
 
 ## Development and build
 
-The backend is written in Go. The web host part is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain HTML and JavaScript.
+The backend is written in Go. The web host part is one PHP file, `frontend/api.php`. The page is plain HTML and JavaScript.
 
 ```bash
 cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
@@ -59,7 +59,7 @@ cd frontend && php -S localhost:8000 api.php
 
 `api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files by name. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
-`frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it. The page sends probes to that address from the browser, so the backend must allow the page's origin in `ALLOWED_ORIGINS`.
+The page's `data-api` attribute and `api.php` point at `http://localhost:8080` by default; the frontend deploy writes the live address into both. The page sends probes to that address from the browser, so the backend must allow the page's origin in `ALLOWED_ORIGINS`.
 
 The backend listens on `127.0.0.1` only. It does not probe internal addresses. To check a server on the local network, start it with `FILTER_INTERNAL_TARGETS=false`. Local names such as `.lan` still stay unresolved; use the server's IP address.
 
@@ -108,7 +108,7 @@ Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at th
 
 For the live check, optionally add the secrets `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server that is always up) and `LIVE_JAVA_HOST` (a Java server that is always up). Without them, those checks are skipped.
 
-The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into `frontend/config.php` and into the page before upload; the page shows the version in the footer.
+The workflow writes `MC_BACKEND` and the release tag into the page and into `api.php` before upload; the page shows the version in the footer.
 
 ### Release flow
 
