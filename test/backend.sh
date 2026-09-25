@@ -82,7 +82,7 @@ CLIENT=203.0.113.6
 for i in $(seq 1 16); do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
 check "budget: 17th request at once -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
 check "429 names the budget"        json "$B/health" "'slow down' in d['error']"
-check "429 says when the batch comes" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | grep -qiE '^Retry-After: [1-7]\$'"
+check "429 says when the batch comes" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | tr -d '\r' | grep -qiE '^Retry-After: [1-7]\$'"
 sleep 8
 for i in 1 2 3; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
 check "budget: 4 tokens after 7 s"  is "$B/ping?ip=127.0.0.1&port=9&edition=java" 200
