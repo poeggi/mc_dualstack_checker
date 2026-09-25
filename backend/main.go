@@ -397,10 +397,10 @@ func originAllowed(allowed []string, origin string) bool {
 }
 
 // clientKey is the address a client is charged for: the first
-// X-Forwarded-For entry, or the peer address when that is no address. The
-// relay on the web host sets the header, and Caddy only accepts forwarded
-// headers from that host, so the chain is trusted end to end. IPv6 clients
-// are keyed by their /64, since one host usually holds a whole /64.
+// X-Forwarded-For entry, or the peer address when that is no address.
+// Caddy accepts forwarded headers from the web host only, so clients cannot
+// forge the entry. IPv6 clients are keyed by their /64, since one host
+// usually holds a whole /64.
 func clientKey(r *http.Request) string {
 	a, err := netip.ParseAddr(strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-For"), ",", 2)[0]))
 	if err != nil {

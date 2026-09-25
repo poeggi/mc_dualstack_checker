@@ -333,7 +333,7 @@ function showHealth(h) {
     $("version").textContent = pageVersion + ", " + (h.up ? "API " + h.data.version : "API unavailable");
     var n = $("notice-backend");
     n.hidden = !(h.up && h.data.ipv6 === false);
-    n.textContent = n.hidden ? "" : "\u26A0 The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.";
+    n.textContent = n.hidden ? "" : "\u26A0 Checker has no IPv6. IPv6 results are void.";
 }
 
 function runCheck(q) {

@@ -12,7 +12,7 @@ Environment=ALLOWED_ORIGINS=*
 Environment=GOMEMLIMIT=64MiB
 MemoryMax=128M
 ExecStart=/usr/local/bin/mc_dualstack_check
-# Usage numbers: stats.json (served by Caddy) and the counters' state.
+# Usage numbers: stats/*.json (served by Caddy) and the counters' state.
 StateDirectory=mc-dualstack-check
 Restart=always
 RestartSec=2

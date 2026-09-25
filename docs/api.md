@@ -106,7 +106,7 @@ Probe results are cached for 60 seconds per `edition`, address and `port`, onlin
 
 ## Limits
 
-Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are charged for their own address, so visitors of the web interface for theirs. When the web interface's host passes a request on, it forwards the visitor's address.
+Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are charged for their own address, so visitors of the web interface for theirs.
 
 - **Distinct systems.** More than 4 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
 - **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.

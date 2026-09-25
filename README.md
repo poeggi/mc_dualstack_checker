@@ -65,7 +65,7 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 ## Tests
 
-- `cd backend && go test ./...` checks how failed probes are classified, the chat nesting limit and text clipping.
+- `cd backend && go test ./...` checks how failed probes are classified, the chat nesting limit, text clipping and the usage counters.
 - `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits.
 - `sh test/live.sh` checks a deployed web interface and API end to end. It reads `WEB` (page URL), `API` (API URL), `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server) and `LIVE_JAVA_HOST` (a Java server). Each part runs only when its setting is given.
 
