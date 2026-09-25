@@ -16,8 +16,13 @@ import (
 )
 
 const (
-	javaIOTimeout   = 3 * time.Second
-	javaMaxResponse = 1 << 20 // 1 MiB; a favicon-carrying status is well below this
+	javaIOTimeout = 3 * time.Second
+	// Clients accept at most 32767 characters of status JSON, favicon
+	// included: 96 KiB in UTF-8.
+	javaMaxResponse = 128 << 10
+	// Real descriptions nest a few levels; each level parses its subtree
+	// again, so deep nesting would cost depth times size.
+	maxChatDepth = 16
 )
 
 // pingJava performs a Server List Ping (handshake + status request) over the
@@ -108,7 +113,7 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 		Protocol:      strconv.Itoa(st.Version.Protocol),
 		PlayersOnline: st.Players.Online,
 		PlayersMax:    st.Players.Max,
-		MOTD:          stripFormatting(flattenChat(st.Description)),
+		MOTD:          stripFormatting(flattenChat(st.Description, 0)),
 	}
 	if info.Version == "" && info.MOTD == "" {
 		return nil, probeError("empty status")
@@ -117,9 +122,10 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 }
 
 // flattenChat turns a chat component (plain string or {text, extra:[...]})
-// into its visible text.
-func flattenChat(raw json.RawMessage) string {
-	if len(raw) == 0 {
+// into its visible text. Components nested deeper than maxChatDepth are
+// left out.
+func flattenChat(raw json.RawMessage, depth int) string {
+	if len(raw) == 0 || depth > maxChatDepth {
 		return ""
 	}
 	var s string
@@ -136,7 +142,7 @@ func flattenChat(raw json.RawMessage) string {
 	var b strings.Builder
 	b.WriteString(obj.Text)
 	for _, e := range obj.Extra {
-		b.WriteString(flattenChat(e))
+		b.WriteString(flattenChat(e, depth+1))
 	}
 	return b.String()
 }

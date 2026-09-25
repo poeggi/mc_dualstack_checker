@@ -93,6 +93,8 @@ During a cooldown every request answers `429` with `Retry-After`.
 
 Global: at most 128 probes in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
 
+At most 10000 clients and 10000 cached results are kept. Beyond that, new clients share one budget and probes run uncached.
+
 ## Running your own
 
 The backend listens on `127.0.0.1` only; put a reverse proxy in front of it. It reads `PORT` (default `8080`), `ALLOWED_ORIGINS` (comma-separated, `*` for any) and `FILTER_INTERNAL_TARGETS`. The last one defaults to `true`; `false` allows probes to internal addresses and internal answers of name lookups, for tests against local servers.

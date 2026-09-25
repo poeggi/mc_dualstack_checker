@@ -23,7 +23,8 @@ const (
 	cooldown      = 60 * time.Second
 	rlBurst       = 20
 	rlRefill      = time.Second
-	clientIdle    = 10 * time.Minute
+	clientIdle    = 2 * time.Minute
+	clientsMax    = 10000
 	healthMax     = 4
 	maxInFlight   = 128
 )
@@ -44,7 +45,8 @@ type probeCache struct {
 var cache = &probeCache{m: map[string]*cacheEntry{}}
 
 // get returns the cached result for key, or runs probe once for all
-// concurrent callers. A probe that returns ok=false is not stored.
+// concurrent callers. A probe that returns ok=false is not stored. With
+// cacheMax entries, new probes run uncached until sweep frees room.
 func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResult, bool)) PingResult {
 	c.mu.Lock()
 	if e := c.m[key]; e != nil {
@@ -66,11 +68,13 @@ func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResu
 			}
 		}
 	}
+	if len(c.m) >= cacheMax {
+		c.mu.Unlock()
+		res, _ := probe()
+		return res
+	}
 	e := &cacheEntry{ready: make(chan struct{})}
 	c.m[key] = e
-	if len(c.m) > cacheMax {
-		c.sweepLocked()
-	}
 	c.mu.Unlock()
 
 	res, ok := probe()
@@ -84,7 +88,10 @@ func (c *probeCache) get(ctx context.Context, key string, probe func() (PingResu
 	return res
 }
 
-func (c *probeCache) sweepLocked() {
+// sweep drops expired results.
+func (c *probeCache) sweep() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for k, e := range c.m {
 		select {
 		case <-e.ready:
@@ -110,10 +117,13 @@ type client struct {
 type limiter struct {
 	mu      sync.Mutex
 	clients map[string]*client
-	sweep   time.Time
 }
 
-var limits = &limiter{clients: map[string]*client{}, sweep: time.Now()}
+var limits = &limiter{clients: map[string]*client{}}
+
+// overflowClient is charged for new clients while the table holds
+// clientsMax, so they share one budget until sweep frees room.
+const overflowClient = "overflow"
 
 // admitProbe charges one probe request to ip and records the target system.
 func (l *limiter) admitProbe(ip, system string) (wait int, reason string) {
@@ -157,15 +167,11 @@ func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if now.Sub(l.sweep) > clientIdle {
-		for k, c := range l.clients {
-			if now.Sub(c.last) > clientIdle && now.After(c.blocked) {
-				delete(l.clients, k)
-			}
-		}
-		l.sweep = now
-	}
 	c := l.clients[ip]
+	if c == nil && len(l.clients) >= clientsMax {
+		ip = overflowClient
+		c = l.clients[ip]
+	}
 	if c == nil {
 		c = &client{tokens: rlBurst, last: now, systems: map[string]time.Time{}}
 		l.clients[ip] = c
@@ -188,6 +194,19 @@ func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) 
 		return secondsUntil(c.blocked, now), cause
 	}
 	return 0, ""
+}
+
+// sweep drops clients idle for clientIdle and out of cooldown. They would
+// be treated exactly like new ones.
+func (l *limiter) sweep() {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, c := range l.clients {
+		if now.Sub(c.last) > clientIdle && now.After(c.blocked) {
+			delete(l.clients, k)
+		}
+	}
 }
 
 func secondsUntil(t, now time.Time) int {

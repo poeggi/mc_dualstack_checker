@@ -66,9 +66,32 @@ func ping(ctx context.Context, edition string, ip net.IP, port int, hostLabel st
 		info, err = pingJava(ctx, network, ip.String(), port, hostLabel)
 	}
 	if err == nil {
+		info.clip()
 		return PingResult{State: "online", RTTms: time.Since(start).Milliseconds(), Info: info}
 	}
 	return failure(err, ip)
+}
+
+// Longest server text kept. Status pages show a two-line MOTD; the other
+// fields are short names and numbers. The limits keep cached results small.
+const (
+	motdMax  = 256
+	fieldMax = 64
+)
+
+func (i *ServerInfo) clip() {
+	i.MOTD = clip(i.MOTD, motdMax)
+	for _, f := range []*string{&i.Edition, &i.Version, &i.Protocol, &i.Gamemode, &i.Map, &i.ServerID} {
+		*f = clip(*f, fieldMax)
+	}
+}
+
+// clip cuts s to at most n bytes without splitting a character.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 // failure is the result of a probe of ip that failed with err.

@@ -4,8 +4,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -32,5 +34,24 @@ func TestFailure(t *testing.T) {
 		if got := failure(c.err, loopback).State; got != c.state {
 			t.Errorf("%s: state %q, want %q", c.name, got, c.state)
 		}
+	}
+}
+
+func TestFlattenChatDepth(t *testing.T) {
+	raw := `"x"`
+	for i := 0; i < 1000; i++ {
+		raw = `{"text":"a","extra":[` + raw + `]}`
+	}
+	if got := flattenChat(json.RawMessage(raw), 0); got != strings.Repeat("a", maxChatDepth+1) {
+		t.Errorf("flattenChat kept %d levels, want %d", len(got), maxChatDepth+1)
+	}
+}
+
+func TestClip(t *testing.T) {
+	if got := clip("a\u00e4b", 2); got != "a" {
+		t.Errorf("clip split a character: %q", got)
+	}
+	if got := clip("abc", 5); got != "abc" {
+		t.Errorf("clip changed a short string: %q", got)
 	}
 }

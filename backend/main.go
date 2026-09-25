@@ -44,7 +44,8 @@ var version = "dev"
 var filterInternal = true
 
 // ipv6Egress caches hasGlobalIPv6. A ticker refreshes it every
-// healthInterval, so /health requests only read it.
+// healthInterval, so /health requests only read it. The same tick sweeps
+// the result cache and the client table.
 var ipv6Egress atomic.Bool
 
 func main() {
@@ -61,6 +62,8 @@ func main() {
 	go func() {
 		for range time.Tick(healthInterval) {
 			ipv6Egress.Store(hasGlobalIPv6())
+			cache.sweep()
+			limits.sweep()
 		}
 	}()
 
@@ -76,6 +79,10 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      resolveTimeout + pingTimeout + 2*time.Second,
+		// Longer than the reverse proxy keeps idle connections (2 min in
+		// Caddy), so the proxy always closes first.
+		IdleTimeout:    3 * time.Minute,
+		MaxHeaderBytes: 16 << 10,
 	}
 	log.Printf("%s listening on %s (ipv6 egress: %v, internal targets filtered: %v)",
 		version, srv.Addr, ipv6Egress.Load(), filterInternal)
@@ -239,7 +246,9 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), pingTimeout)
+	// The probe may be shared and its result cached, so it does not end
+	// when this client goes away.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), pingTimeout)
 	defer cancel()
 	key := edition + "|" + ip.String() + "|" + strconv.Itoa(port)
 	res := cache.get(ctx, key, func() (PingResult, bool) {
