@@ -1,11 +1,12 @@
 # The web host runs PHP as CGI and refuses scripts (403) without this.
 Options +ExecCGI
-DirectoryIndex index.php
 
-# api.php answers at api/<endpoint>. Scripts are not reachable by name.
+# index.php is the page, api.php answers at api/<endpoint>. Scripts are
+# not reachable by name.
 RewriteEngine On
 RewriteCond %{THE_REQUEST} ^\S+\s[^?\s]*\.php[?\s/]
 RewriteRule ^ - [R=404,L]
+RewriteRule ^$ index.php [L]
 RewriteRule ^api/[^/]+$ api.php [L]
 # Dot files, such as the health copy, are not served.
 RewriteRule (^|/)\. - [R=404,L]
