@@ -2,9 +2,9 @@
 "use strict";
 
 // Draws the finished periods the backend publishes under stats/, one file
-// per kind of period: a bar chart of unique clients, IPv4 and IPv6 stacked,
-// with a scale, and a table with clients and requests. The data lists the
-// newest period first; the chart shows it rightmost.
+// per kind of period: a bar chart of requests or unique clients (a switch
+// picks), IPv4 and IPv6 stacked, with a scale, and a table with both. The
+// data lists the newest period first; the chart shows it rightmost.
 var KINDS = [
     ["minutes", "Last 60 minutes"], ["hours", "Last 24 hours"],
     ["days", "Last 30 days"], ["months", "Last 12 months"]
@@ -30,7 +30,9 @@ function label(kind, start) {
     return ymd.slice(0, 7);
 }
 
-function clients(r) { return r.ipv4.clients + r.ipv6.clients; }
+// The number the charts show, "requests" or "clients".
+var metric = "requests";
+function value(r) { return r.ipv4[metric] + r.ipv6[metric]; }
 
 // One box for all bars: the period's clients per family, absolute and in
 // percent. It follows the mouse, and a tap opens it on touch screens.
@@ -39,10 +41,10 @@ tip.hidden = true;
 document.body.appendChild(tip);
 
 function showTip(kind, r, e) {
-    var total = clients(r);
+    var total = value(r);
     tip.textContent = "";
     tip.appendChild(el("div", "tip-head", label(kind, r.start)));
-    [["v4", "IPv4", r.ipv4.clients], ["v6", "IPv6", r.ipv6.clients]].forEach(function (f) {
+    [["v4", "IPv4", r.ipv4[metric]], ["v6", "IPv6", r.ipv6[metric]]].forEach(function (f) {
         var line = el("div");
         line.appendChild(el("span", "key " + f[0]));
         var pct = total ? " (" + Math.round(f[2] / total * 100) + " %)" : "";
@@ -70,7 +72,7 @@ function scaleTop(max) {
 }
 
 function chart(kind, rows) {
-    var top = scaleTop(Math.max.apply(null, rows.map(clients)));
+    var top = scaleTop(Math.max.apply(null, rows.map(value)));
     var c = el("div", "chart");
     var scale = el("div", "scale");
     [top, top / 2, 0].forEach(function (v) { scale.appendChild(el("span", "", v % 1 ? "" : String(v))); });
@@ -82,7 +84,7 @@ function chart(kind, rows) {
         bar.addEventListener("mousemove", moveTip);
         bar.addEventListener("mouseleave", hideTip);
         bar.addEventListener("click", function (e) { e.stopPropagation(); showTip(kind, r, e); });
-        [["v4", r.ipv4.clients], ["v6", r.ipv6.clients]].forEach(function (part) {
+        [["v4", r.ipv4[metric]], ["v6", r.ipv6[metric]]].forEach(function (part) {
             var seg = el("div", part[0]);
             seg.style.height = (part[1] / top * 100) + "%";
             bar.appendChild(seg);
@@ -128,16 +130,42 @@ document.addEventListener("click", hideTip);
 
 var box = document.getElementById("stats");
 box.textContent = "";
+var sections = {}, loaded = {};
+
+// draw fills a section from the loaded data; the numbers table stays open
+// when it was.
+function draw(kind) {
+    var s = sections[kind];
+    var details = s.querySelector("details");
+    var open = !!(details && details.open);
+    while (s.children.length > 1) s.removeChild(s.lastChild);
+    fill(s, kind, loaded[kind]);
+    details = s.querySelector("details");
+    if (details) details.open = open;
+}
+
 KINDS.forEach(function (k) {
     var s = el("section");
     s.appendChild(el("h2", "", k[1]));
     box.appendChild(s);
+    sections[k[0]] = s;
     fetch("stats/" + k[0] + ".json", { cache: "no-cache" }).then(function (res) {
         if (!res.ok) throw new Error(res.status);
         return res.json();
     }).then(function (data) {
-        fill(s, k[0], data.periods || []);
+        loaded[k[0]] = data.periods || [];
+        draw(k[0]);
     }, function () {
         s.appendChild(el("p", "empty", "Not available."));
+    });
+});
+
+var buttons = document.querySelectorAll(".switch button");
+buttons.forEach(function (b) {
+    b.addEventListener("click", function () {
+        if (b.dataset.metric === metric) return;
+        metric = b.dataset.metric;
+        buttons.forEach(function (o) { o.classList.toggle("on", o === b); });
+        Object.keys(loaded).forEach(draw);
     });
 });
