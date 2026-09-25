@@ -33,6 +33,11 @@ esac
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
+# Every transfer is time-limited, so a stalled download cannot hold the run.
+curl() {
+    command curl --connect-timeout 5 --max-time 60 "$@"
+}
+
 # The functions run in "||" lists, where set -e does not apply, so every
 # step that must not fail carries its own "|| return 1".
 

@@ -2,12 +2,15 @@
 Description=mc_dualstack_check backend
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 User=mcdc
 Group=mcdc
 Environment=PORT=8080
 Environment=ALLOWED_ORIGINS=*
+Environment=GOMEMLIMIT=64MiB
+MemoryMax=128M
 ExecStart=/usr/local/bin/mc_dualstack_check
 Restart=always
 RestartSec=2
