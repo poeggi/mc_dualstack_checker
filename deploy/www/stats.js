@@ -7,7 +7,7 @@
 // table. The data lists the newest period first; the chart shows it
 // rightmost.
 var KINDS = [
-    ["minutes", "Last 60 minutes"], ["hours", "Last 24 hours"],
+    ["minutes", "Last 60 minutes"], ["hours", "Last 48 hours"],
     ["days", "Last 30 days"], ["months", "Last 12 months"]
 ];
 

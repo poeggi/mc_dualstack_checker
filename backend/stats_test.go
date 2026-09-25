@@ -124,7 +124,7 @@ func TestUsageGapAfterDowntime(t *testing.T) {
 	now := last.Add(3 * time.Hour)
 	u.roll(now)
 	h := u.Series["hours"].Done
-	if len(h) != 24 || !h[0].Start.Equal(now.Truncate(time.Hour).Add(-time.Hour)) ||
+	if len(h) != 48 || !h[0].Start.Equal(now.Truncate(time.Hour).Add(-time.Hour)) ||
 		h[0].IPv4.Requests != 0 || h[1].IPv4.Requests != 0 || h[2].IPv4.Requests != 1 {
 		t.Fatalf("hours after 2 idle hours: %+v", h[:3])
 	}

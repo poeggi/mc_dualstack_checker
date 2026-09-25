@@ -102,7 +102,7 @@ type periodKind struct {
 var periodKinds = []periodKind{
 	{"minutes", 60, func(t time.Time) time.Time { return t.Truncate(time.Minute) },
 		func(t time.Time) time.Time { return t.Add(time.Minute) }},
-	{"hours", 24, func(t time.Time) time.Time { return t.Truncate(time.Hour) },
+	{"hours", 48, func(t time.Time) time.Time { return t.Truncate(time.Hour) },
 		func(t time.Time) time.Time { return t.Add(time.Hour) }},
 	{"days", 30, func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC) },
 		func(t time.Time) time.Time { return t.AddDate(0, 0, 1) }},
