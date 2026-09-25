@@ -56,6 +56,36 @@ func TestUsageRoll(t *testing.T) {
 	}
 }
 
+func TestUsageGapAfterDowntime(t *testing.T) {
+	u := newUsage()
+	t0 := time.Date(2026, 9, 25, 0, 0, 30, 0, time.UTC)
+	for i := 0; i < 72; i++ {
+		u.add(t0.Add(time.Duration(i)*time.Hour), sample{false, "198.51.100.1"})
+	}
+	last := t0.Add(71 * time.Hour)
+
+	now := last.Add(3 * time.Hour)
+	u.roll(now)
+	h := u.Series["hours"].Done
+	if len(h) != 24 || !h[0].Start.Equal(now.Truncate(time.Hour).Add(-time.Hour)) ||
+		h[0].IPv4.Requests != 0 || h[1].IPv4.Requests != 0 || h[2].IPv4.Requests != 1 {
+		t.Fatalf("hours after 2 idle hours: %+v", h[:3])
+	}
+
+	now = last.Add(40 * 24 * time.Hour)
+	u.roll(now)
+	d := u.Series["days"].Done
+	want := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -1)
+	if len(d) != 30 || !d[0].Start.Equal(want) || d[29].IPv4.Requests != 0 {
+		t.Fatalf("days after 40 idle days: newest %v, want %v", d[0].Start, want)
+	}
+	for i := 1; i < len(d); i++ {
+		if !d[i].Start.Equal(d[i-1].Start.AddDate(0, 0, -1)) {
+			t.Fatalf("days not consecutive at %d: %v, %v", i, d[i-1].Start, d[i].Start)
+		}
+	}
+}
+
 func TestUsageSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, statsPublic), 0o755); err != nil {

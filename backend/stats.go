@@ -189,8 +189,16 @@ func (u *usage) roll(now time.Time) {
 		}
 		if !s.Cur.Start.IsZero() {
 			s.Done = append([]bucket{s.finished()}, s.Done...)
-			for t := k.next(s.Cur.Start); t.Before(start) && len(s.Done) < k.keep; t = k.next(t) {
-				s.Done = append([]bucket{{Start: t}}, s.Done...)
+			// Missed periods, newest last; only the newest keep matter.
+			var missed []bucket
+			for t := k.next(s.Cur.Start); t.Before(start); t = k.next(t) {
+				missed = append(missed, bucket{Start: t})
+				if len(missed) > k.keep {
+					missed = missed[1:]
+				}
+			}
+			for _, b := range missed {
+				s.Done = append([]bucket{b}, s.Done...)
 			}
 		}
 		if len(s.Done) > k.keep {
