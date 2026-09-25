@@ -37,7 +37,7 @@ The public API is the backend, documented in [docs/api.md](docs/api.md): the end
 
 The page sends its probes straight to the API. The web host keeps one copy of the backend's `/health` for all visitors. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend. The deploy keeps the copy.
 
-`index.php` puts the settings and this copy into the page: the API address, the page version, and the backend's version and IPv6 state for the footer. Opening the page needs no further request. When the copy was older than 7 s, the page updates the footer after 6.5 s.
+`index.php` puts the settings and this copy into the page: the API address, the page version, and the backend's version and IPv6 state for the footer. Opening the page needs no further request.
 
 `api/backend-health` answers with the copy, its age in the `Age` header, for the page when a probe fails and for anyone who wants to check. It answers `502` when the web host could not reach the API, and `503` when none is configured or no copy exists yet. Other `api/` paths answer `404`. The web host looks up no server names itself.
 

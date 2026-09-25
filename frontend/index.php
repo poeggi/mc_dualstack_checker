@@ -31,7 +31,7 @@ ob_start();
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <script src="mc_dualstack_check.js" defer></script>
 </head>
-<body data-api="<?= h(rtrim(MC_BACKEND, '/')) ?>" data-version="<?= h(MC_VERSION) ?>" data-health-age="<?= $kept === null ? '' : $kept['age'] ?>"><main>
+<body data-api="<?= h(rtrim(MC_BACKEND, '/')) ?>" data-version="<?= h(MC_VERSION) ?>"><main>
 <div class="page">
 
     <header class="header">
