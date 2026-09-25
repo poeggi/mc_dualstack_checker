@@ -235,7 +235,13 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ip == nil {
+		// A lookup takes one of the in-flight slots while it runs.
+		if !acquireProbe() {
+			busy(w)
+			return
+		}
 		ip, err = resolveFamily(r.Context(), host, family)
+		releaseProbe()
 		switch {
 		case err != nil:
 			writeJSON(w, PingResult{State: "dns_error", Error: lookupReason(err)})
@@ -259,12 +265,17 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		return ping(ctx, edition, ip, port, host), true
 	})
 	if res.State == "busy" {
-		w.Header().Set("Retry-After", "5")
-		httpError(w, http.StatusServiceUnavailable, "checker busy, try again shortly")
+		busy(w)
 		return
 	}
 	res.IP = ip.String()
 	writeJSON(w, res)
+}
+
+// busy answers that all in-flight slots are taken.
+func busy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	httpError(w, http.StatusServiceUnavailable, "checker busy, try again shortly")
 }
 
 var limitMessages = map[string]string{

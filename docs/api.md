@@ -91,7 +91,7 @@ Per client address: an IPv4 address, or the /64 of an IPv6 address. Direct calle
 
 During a cooldown every request answers `429` with `Retry-After`.
 
-Global: at most 128 probes in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
+Global: at most 128 probes and name lookups in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
 
 At most 10000 clients and 10000 cached results are kept. Beyond that, new clients share one budget and probes run uncached.
 
