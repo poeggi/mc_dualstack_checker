@@ -6,6 +6,8 @@ mcdscheck-api.poggensee.it {
 	root * /var/www/mcdc
 	header -Server
 	header -Via
+	# The landing page loads only its own stylesheet and icon.
+	header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 	@api path /ping /health
 	handle @api {
 		reverse_proxy 127.0.0.1:8080 {

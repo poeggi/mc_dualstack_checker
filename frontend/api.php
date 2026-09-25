@@ -35,15 +35,19 @@ function fail(int $code, string $msg): never {
     exit;
 }
 
-// backend asks the backend and returns [status, body, retry-after]; the
-// body is null without a JSON answer. With forward, the backend gets the
-// client address for its per-client limits.
+// Seconds one call to the backend may take. Two tries stay within
+// HEALTH_TTL.
+const BACKEND_TIMEOUT = 3;
+
+// backend asks the backend and returns [status, body, retry-after]; status
+// is 0 and body null without a JSON answer. With forward, the backend gets
+// the client address for its per-client limits.
 function backend(string $endpoint, array $params, bool $forward): array {
     $url = rtrim(MC_BACKEND, '/') . '/' . $endpoint . ($params ? '?' . http_build_query($params) : '');
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_TIMEOUT        => BACKEND_TIMEOUT,
         CURLOPT_USERAGENT      => 'mc_dualstack_check/' . MC_VERSION . ' (https://www.poggensee.it/mc_dualstack_check/)',
         CURLOPT_HTTPHEADER     => $forward ? ['X-Forwarded-For: ' . ($_SERVER['REMOTE_ADDR'] ?? '')] : [],
     ]);
@@ -91,8 +95,10 @@ const HEALTH_CACHE = __DIR__ . '/.health.json';
 
 // health answers all visitors from one copy of the backend's /health,
 // fetched at most every HEALTH_TTL seconds and as this host, so no
-// visitor's reloads count against the backend's health limit. Without a
-// usable cache file it relays directly.
+// visitor's reloads count against the backend's health limit. A fetch
+// without an answer is tried once more, and a failure is kept like an
+// answer, so during an outage at most one visitor per HEALTH_TTL waits.
+// Without a usable cache file it relays directly.
 function health(): never {
     if (MC_BACKEND === '') {
         fail(503, 'no backend configured');
@@ -102,23 +108,21 @@ function health(): never {
         relay('health');
     }
     clearstatcache(true, HEALTH_CACHE);
-    $body = stream_get_contents($fh);
-    if ($body === false || $body === '' || time() - filemtime(HEALTH_CACHE) >= HEALTH_TTL) {
+    $kept = json_decode(stream_get_contents($fh) ?: 'null', true);
+    if (!isset($kept['status']) || time() - filemtime(HEALTH_CACHE) >= HEALTH_TTL) {
         [$status, $body, $retry] = backend('health', [], false);
-        if ($status !== 200) {
-            flock($fh, LOCK_UN);
-            fclose($fh);
-            respond($status, $body, $retry);
+        if ($status === 0) {
+            [$status, $body, $retry] = backend('health', [], false);
         }
+        $kept = ['status' => $status, 'body' => $body, 'retry' => $retry];
         ftruncate($fh, 0);
         rewind($fh);
-        fwrite($fh, $body);
+        fwrite($fh, json_encode($kept));
         fflush($fh);
     }
     flock($fh, LOCK_UN);
     fclose($fh);
-    echo $body;
-    exit;
+    respond($kept['status'], $kept['body'], $kept['retry']);
 }
 
 switch (basename($path)) {

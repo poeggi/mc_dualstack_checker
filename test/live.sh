@@ -67,6 +67,8 @@ if [ -n "$API" ]; then
     echo "== api $API"
     check "landing page"     is "$API/" 200
     check "icon"             is "$API/favicon.svg" 200
+    check "stylesheet"       is "$API/style.css" 200
+    check "landing page CSP" header "$(curl -s -D - -o /dev/null "$API/")" "^content-security-policy: default-src 'none'"
     check "health: ok, ipv6"            json "$API/health" "d['ok'] and d['ipv6']"
     if [ -n "$HOST" ]; then
         V4=$(address 4)
