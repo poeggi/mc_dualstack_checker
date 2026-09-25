@@ -6,6 +6,10 @@ mcdscheck-api.poggensee.it {
 	root * /var/www/mcdc
 	header -Server
 	header -Via
+	# HTTPS only, no content sniffing, no referrer to other sites.
+	header Strict-Transport-Security "max-age=31536000"
+	header ?X-Content-Type-Options "nosniff"
+	header Referrer-Policy "no-referrer"
 	# The pages load only this host's own files.
 	header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 	@api path /ping /health
@@ -22,6 +26,11 @@ mcdscheck-api.poggensee.it {
 		root * /var/lib/mc-dualstack-check
 		header Cache-Control "public, max-age=60"
 		file_server
+	}
+	# Errors of this server itself, such as 404 and 405, get a short text.
+	handle_errors {
+		header X-Content-Type-Options "nosniff"
+		respond "{err.status_code} {err.status_text}"
 	}
 	handle {
 		rewrite /stats /stats.html
