@@ -37,5 +37,6 @@ jobs:
 
       - name: live checks
         env:
+          LIVE_BEDROCK_HOST: ${{ secrets.LIVE_BEDROCK_HOST }}
           EXPECT_VERSION: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') && github.event.workflow_run.head_branch || '' }}
         run: sh test/live.sh
