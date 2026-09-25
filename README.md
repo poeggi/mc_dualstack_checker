@@ -14,6 +14,8 @@ The live instance is free to use for non-commercial users or purposes only.
 
 Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone who runs a modified copy, also as a network service, has to offer its source under the same terms.
 
+Co-developed with Claude, Anthropic's AI assistant.
+
 ## Design principles
 
 **Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps a short in-memory result cache, the rate limits and anonymous usage counts: no stored addresses, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a small helper on the web host. The browser talks only to the web host and to the API, never to third parties. The API sees visitors' addresses. Minecraft server names are looked up by the backend only, never in the browser. Changing behaviour means editing the page, not redeploying a service.
