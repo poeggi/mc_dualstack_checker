@@ -24,7 +24,7 @@ section { display: flex; flex-direction: column; gap: .3rem; }
 .legend .switch { display: flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .switch button { font: inherit; font-size: .8rem; color: var(--muted); background: var(--surface); border: 0; padding: .15rem .6rem; cursor: pointer; }
 .switch button.on { color: var(--bg); background: var(--blue); cursor: default; }
-.switch.split button.on { color: #fff; background: #586174; }
+.switch.split button.on { background: var(--text); }
 .key { display: inline-block; width: .8rem; height: .8rem; border-radius: 2px; }
 .v4 { background: var(--blue); }
 .v6 { background: var(--green); }
