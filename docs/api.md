@@ -2,7 +2,7 @@
 
 The API is for using the backend, a live instance od the service running at `https://mcdscheck-api.poggensee.it`. Use it from your own code; it allows cross-origin requests from any site. `https://mcdscheck-api.poggensee.it/` is a landing page with these links.
 
-NOTE: Usage of the live instance of the service running at poggensee.it is limited to non-commercial cases only.
+NOTE: The live instance at poggensee.it is free to use for non-commercial users or purposes only.
 
 The web interface reaches the backend through its frontend, a relay on the web host (see README).
 
