@@ -60,13 +60,13 @@ function table(kind, rows) {
 }
 
 function section(kind, title, rows) {
-    var max = Math.max.apply(null, rows.map(function (r) { return r.ipv4.clients + r.ipv6.clients; })) || 1;
+    var max = Math.max.apply(null, rows.map(function (r) { return r.ipv4.clients + r.ipv6.clients; }));
     var s = el("section");
     s.appendChild(el("h2", "", title));
-    s.appendChild(chart(kind, rows, max));
+    s.appendChild(chart(kind, rows, Math.max(max, 1)));
     var axis = el("div", "axis");
     axis.appendChild(el("span", "", label(kind, rows[rows.length - 1].start)));
-    axis.appendChild(el("span", "", "max " + max + " clients"));
+    axis.appendChild(el("span", "", "max " + max + (max === 1 ? " client" : " clients")));
     axis.appendChild(el("span", "", label(kind, rows[0].start)));
     s.appendChild(axis);
     var details = el("details");
