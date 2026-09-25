@@ -167,6 +167,7 @@ button {
     cursor: pointer;
 }
 button:hover { opacity: .88; }
+button:disabled:not(.btn-active) { opacity: .4; cursor: default; }
 
 /* Button while a check runs: dimmed, with a spinner that fades out. */
 button:active,

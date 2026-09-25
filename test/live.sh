@@ -73,6 +73,9 @@ if [ -n "$WEB" ]; then
         check "page names the API"      header "$page" "data-api=\"$API\""
     fi
     check "page names its version"  header "$page" 'data-version="[^"]'
+    webv=$(printf '%s\n' "$page" | sed -n 's/.*data-version="\([^"]*\)".*/\1/p')
+    check "includes stamped with the version" [ "$(printf '%s\n' "$page" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$webv\"" ]
+    check "script cached for an hour" header "$(curl -s -D - -o /dev/null "$WEB/mc_dualstack_check.js?v=$webv")" "^cache-control: .*max-age=3600"
     check "health copy: ok, ipv6"   has "$(host_health)" "d['ok'] and d['ipv6']"
     check "no config endpoint -> 404" is "$WEB/api/config" 404
     check "no probe relay -> 404"   is "$WEB/api/ping?ip=192.0.2.1&port=1" 404
@@ -131,6 +134,10 @@ if [ -n "$API" ]; then
     check "unknown endpoint -> 404"     is "$API/nope" 404
     check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/ping?ip=nope&port=1' | grep -qiE '^(server|via):'"
     check "landing page shows version"  sh -c "curl -s '$API/' | grep -q 'id=\"api-version\">v'"
+    pagev=$(curl -s "$API/" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')
+    check "landing page includes stamped" [ "$(curl -s "$API/" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
+    check "usage page includes stamped" [ "$(curl -s "$API/stats" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
+    check "script cached for an hour"   header "$(curl -s -D - -o /dev/null "$API/stats.js?v=$pagev")" "^cache-control: public, max-age=3600"
     sleep 4
     apiv=$(curl -s "$API/health" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["version"])')
     if [ -n "$EXPECT_VERSION" ]; then
@@ -142,8 +149,6 @@ fi
 
 if [ -n "$WEB" ] && [ -n "$API" ]; then
     echo "== consistency"
-    webv=$(curl -s "$WEB/" | sed -n 's/.*data-version="\([^"]*\)".*/\1/p')
-    pagev=$(curl -s "$API/" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')
     echo "      web $webv, api $apiv, landing page $pagev"
     check "web and api versions match"  [ "$webv" = "$apiv" ]
     check "landing page version matches" [ "$pagev" = "$apiv" ]

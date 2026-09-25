@@ -79,9 +79,14 @@ check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&editi
 
 echo "== limits"
 CLIENT=203.0.113.6
-for i in 1 2 3 4 5 6 7 8; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
-check "budget: 9th request at once -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
+for i in $(seq 1 16); do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
+check "budget: 17th request at once -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
 check "429 names the budget"        json "$B/health" "'slow down' in d['error']"
+check "429 says when the batch comes" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | grep -qiE '^Retry-After: [1-7]\$'"
+sleep 8
+for i in 1 2 3; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
+check "budget: 4 tokens after 7 s"  is "$B/ping?ip=127.0.0.1&port=9&edition=java" 200
+check "budget: 5th before the next batch -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
 CLIENT=203.0.113.7
 for i in 1 2 3 4; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
 check "4 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200

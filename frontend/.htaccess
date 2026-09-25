@@ -15,11 +15,14 @@ RewriteRule (^|/)\. - [R=404,L]
     SetEnvIf Request_URI "/api/[^/]+$" no-gzip=1
 </IfModule>
 
-# Page, script and stylesheet change together with each release. Browsers
-# revalidate them on every load (a cheap 304 when unchanged), so a cached
-# page never meets a newer stylesheet.
+# Browsers revalidate the page on every load (a cheap 304 when unchanged).
+# Stylesheet, script and icons are cached for an hour: the page names them
+# with the release as a version stamp, so a new release is a new URL.
 <IfModule mod_headers.c>
-    <FilesMatch "\.(html|css|js)$">
+    <FilesMatch "\.html$">
         Header set Cache-Control "no-cache"
+    </FilesMatch>
+    <FilesMatch "\.(css|js|svg|png)$">
+        Header set Cache-Control "public, max-age=3600"
     </FilesMatch>
 </IfModule>

@@ -33,7 +33,7 @@ jobs:
         # sed replacements.
         env:
           MC_BACKEND: ${{ vars.MC_BACKEND }}
-          VERSION: ${{ github.event.release.tag_name || 'manual' }}
+          VERSION: ${{ github.event.release.tag_name || format('manual-{0}', github.run_number) }}
         run: |
           for v in "$MC_BACKEND" "$VERSION"; do
             case "$v" in *[\'\"\\\&\|\<\>]*) echo "unexpected character in a config value" >&2; exit 1 ;; esac
@@ -41,12 +41,17 @@ jobs:
           API=${MC_BACKEND%/}
           sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"$API\"|" \
                  -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
-                 -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" frontend/index.html
+                 -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" \
+                 -e "s|?v=[^\"]*\"|?v=$VERSION\"|g" frontend/index.html
           sed -i -e "s|^define('MC_BACKEND', '[^']*');|define('MC_BACKEND', '$API');|" \
                  -e "s|^define('MC_VERSION', '[^']*');|define('MC_VERSION', '$VERSION');|" frontend/api.php
           grep -F "<body data-api=\"$API\" data-version=\"$VERSION\">" frontend/index.html
           grep -F "define('MC_BACKEND', '$API');" frontend/api.php
           grep -F "define('MC_VERSION', '$VERSION');" frontend/api.php
+          # Every include stamp carries the release, or the upload stops.
+          n=$(grep -o '?v=[^"]*"' frontend/index.html | wc -l)
+          m=$(grep -o -F "?v=$VERSION\"" frontend/index.html | wc -l)
+          [ "$n" -gt 0 ] && [ "$n" -eq "$m" ] || { echo "$m of $n stamps carry $VERSION" >&2; exit 1; }
 
       - name: install lftp
         # The runner image carries a Google Chrome apt source whose hash
@@ -74,7 +79,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           LIVE_URL: ${{ vars.LIVE_URL }}
-          VERSION: ${{ github.event.release.tag_name || 'manual' }}
+          VERSION: ${{ github.event.release.tag_name || format('manual-{0}', github.run_number) }}
         run: |
           test -n "$LIVE_URL" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
           curl -fsS "$LIVE_URL" | grep -F "data-version=\"$VERSION\""

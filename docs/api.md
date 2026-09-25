@@ -110,7 +110,7 @@ Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are 
 
 - **Distinct systems.** More than 4 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
 - **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.
-- **Request budget.** 8 requests, refilled by 2 every 7 seconds. Over it: `429` with `Retry-After`.
+- **Request budget.** 16 requests; 4 come back together every 7 seconds. Over it: `429` with `Retry-After` naming the seconds until the next 4 arrive.
 
 During a cooldown every valid request answers `429` with `Retry-After`.
 

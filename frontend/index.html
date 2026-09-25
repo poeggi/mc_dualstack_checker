@@ -6,16 +6,16 @@
     <title>Minecraft Server Dualstack Checker - IPv4 &amp; IPv6 Status</title>
     <meta name="description" content="Check the online status of any Minecraft server over both IPv4 and IPv6. Supports Bedrock and Java editions with automatic port fallback.">
     <meta name="keywords" content="Minecraft server status, Minecraft dualstack server checker, IPv4 IPv6 dual stack, Bedrock server status, Java server status, MC server ping, Minecraft online checker">
-    <link rel="stylesheet" href="mc_dualstack_check.css">
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <script src="mc_dualstack_check.js" defer></script>
+    <link rel="stylesheet" href="mc_dualstack_check.css?v=dev">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=dev">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png?v=dev">
+    <script src="mc_dualstack_check.js?v=dev" defer></script>
 </head>
 <body data-api="http://localhost:8080" data-version="dev"><main>
 <div class="page">
 
     <header class="header">
-        <img src="favicon.svg" width="16" height="16" alt="" aria-hidden="true">
+        <img src="favicon.svg?v=dev" width="16" height="16" alt="" aria-hidden="true">
         <h1 class="text-title">MC Server Dualstack Check</h1>
     </header>
 
@@ -25,7 +25,7 @@
                 <div class="form-row">
                     <div class="field field-wide">
                         <label class="text-label text-strong" for="f-host">HOSTNAME | IP ADDRESS</label>
-                        <input name="host" id="f-host" placeholder="e.g. play.example.com" autocapitalize="none" autocorrect="off" spellcheck="false">
+                        <input name="host" id="f-host" placeholder="e.g. play.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" required>
                     </div>
                     <div class="field">
                         <label class="text-label text-strong" for="f-port4">IPv4 PORT</label>

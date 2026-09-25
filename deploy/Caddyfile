@@ -34,12 +34,13 @@ mcdscheck-api.poggensee.it {
 	}
 	handle {
 		rewrite /stats /stats.html
-		# Pages, scripts and styles change with each release, so browsers
-		# revalidate them on every load. Icons are kept for a day.
-		@icons path *.svg *.png
-		@other not path *.svg *.png
-		header @other Cache-Control "no-cache"
-		header @icons Cache-Control "public, max-age=86400"
+		# Browsers revalidate the pages on every load. Scripts, styles and
+		# icons are cached for an hour: the pages name them with the release
+		# as a version stamp, so a new release is a new URL.
+		@assets path *.css *.js *.svg *.png
+		@pages not path *.css *.js *.svg *.png
+		header @pages Cache-Control "no-cache"
+		header @assets Cache-Control "public, max-age=3600"
 		file_server
 	}
 }

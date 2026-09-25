@@ -106,11 +106,20 @@ function validatePortField(el) {
 port4El.addEventListener("blur", function () { validatePortField(port4El); });
 port6El.addEventListener("blur", function () { validatePortField(port6El); });
 
+var checking = false;
 function setBusy(busy) {
+    checking = busy;
     submitBtn.classList.toggle("btn-active", busy);
-    submitBtn.disabled = busy;
     $("checking-indicator").hidden = !busy;
+    updateSubmit();
 }
+
+// The Check button is greyed out while the host field is empty.
+function updateSubmit() {
+    submitBtn.disabled = checking || !hostEl.value.trim();
+}
+hostEl.addEventListener("input", updateSubmit);
+hostEl.addEventListener("change", updateSubmit);
 
 // showNotice shows msg in the notice box, red unless kind is "ok".
 function showNotice(msg, kind) {
@@ -157,6 +166,7 @@ function fillForm(q) {
     nofallbackEl.checked = q.nofallback;
     updatePort4Placeholder();
     port6El.placeholder = q.port4 || "as IPv4";
+    updateSubmit();
 }
 
 // -- API ---------------------------------------------------------

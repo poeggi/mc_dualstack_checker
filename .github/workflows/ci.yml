@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: 22
       - run: node --check frontend/mc_dualstack_check.js
+      - name: local includes carry a version stamp
+        run: |
+          ! grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html deploy/www/*.html
       - run: php -l frontend/api.php
       - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh
       - name: ascii only

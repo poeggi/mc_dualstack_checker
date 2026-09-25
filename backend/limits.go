@@ -22,8 +22,9 @@ const (
 	systemsWindow = 60 * time.Second
 	systemsMax    = 4
 	cooldown      = 60 * time.Second
-	rlBurst       = 8
-	rlRefill      = 7 * time.Second / 2 // 2 tokens per 7 s
+	rlBurst       = 16
+	rlBatch       = 4 // tokens that arrive together
+	rlBatchEvery  = 7 * time.Second
 	clientIdle    = 2 * time.Minute
 	clientsMax    = 10000
 	healthMax     = 4
@@ -107,8 +108,9 @@ func (c *probeCache) sweep() {
 // -- per-client limits ---------------------------------------------
 
 type client struct {
-	tokens  float64
-	last    time.Time
+	tokens  int
+	refill  time.Time // when the next batch of tokens arrives
+	last    time.Time // last request, for sweep
 	systems map[string]time.Time
 	health  []time.Time
 	blocked time.Time
@@ -174,19 +176,26 @@ func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) 
 		c = l.clients[ip]
 	}
 	if c == nil {
-		c = &client{tokens: rlBurst, last: now, systems: map[string]time.Time{}}
+		c = &client{tokens: rlBurst, refill: now.Add(rlBatchEvery), systems: map[string]time.Time{}}
 		l.clients[ip] = c
 	}
+	c.last = now
 	if now.Before(c.blocked) {
 		return secondsUntil(c.blocked, now), c.cause
 	}
-	c.tokens += now.Sub(c.last).Seconds() / rlRefill.Seconds()
-	if c.tokens > rlBurst {
-		c.tokens = rlBurst
+	// Every batch due since the last one is credited. A full bucket
+	// restarts the clock.
+	if !now.Before(c.refill) {
+		batches := int(now.Sub(c.refill)/rlBatchEvery) + 1
+		c.tokens += batches * rlBatch
+		c.refill = c.refill.Add(time.Duration(batches) * rlBatchEvery)
+		if c.tokens >= rlBurst {
+			c.tokens = rlBurst
+			c.refill = now.Add(rlBatchEvery)
+		}
 	}
-	c.last = now
 	if c.tokens < 1 {
-		return secondsUntil(now.Add(time.Duration((1-c.tokens)*float64(rlRefill))), now), "rate"
+		return secondsUntil(c.refill, now), "rate"
 	}
 	c.tokens--
 
