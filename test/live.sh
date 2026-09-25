@@ -51,8 +51,13 @@ host_health() {
     fi
     printf '%s\n' "$h" | sed '1,/^$/d'
 }
+# Requests to /ping and /health are charged to this runner's address. The
+# API's budget is 8, refilled by 2 every 7 s, so they are paced at one per
+# 4 s: paced <label> <command...> is check after a pause.
+paced() { sleep 4; check "$@"; }
 # address <family>: the address the API probes for HOST in that family
 address() {
+    sleep 4
     curl -s "$API/ping?host=$HOST&family=$1&port=19132" |
         "$PY" -c "import sys,json; d=json.load(sys.stdin); print(d['ip'] if d['state'] == 'online' else '')" 2>/dev/null
 }
@@ -88,7 +93,7 @@ if [ -n "$API" ]; then
         check "usage numbers: $k" json "$API/stats/$k.json" "isinstance(d['periods'], list)"
     done
     check "landing page CSP" header "$(curl -s -D - -o /dev/null "$API/")" "^content-security-policy: default-src 'none'"
-    check "health: ok, ipv6"            json "$API/health" "d['ok'] and d['ipv6']"
+    paced "health: ok, ipv6"            json "$API/health" "d['ok'] and d['ipv6']"
     if [ -n "$HOST" ]; then
         V4=$(address 4)
         V6=$(address 6)
@@ -97,20 +102,20 @@ if [ -n "$API" ]; then
         fi
         check "bedrock: name, IPv4 online"  [ -n "$V4" ]
         check "bedrock: name, IPv6 online"  [ -n "$V6" ]
-        check "bedrock: v4 literal"         json "$API/ping?ip=$V4&port=19132&host=$HOST" "d['state'] == 'online'"
-        check "bedrock: v6 literal bare"    json "$API/ping?ip=$V6&port=19132&host=$HOST" "d['state'] == 'online'"
-        check "bedrock: v6 literal bracketed" json "$API/ping?ip=%5B$V6%5D&port=19132&host=$HOST" "d['state'] == 'online'"
-        check "bedrock: second call cached" json "$API/ping?ip=$V4&port=19132&host=$HOST" "d.get('cached') and d['age_s'] >= 0"
+        paced "bedrock: v4 literal"         json "$API/ping?ip=$V4&port=19132&host=$HOST" "d['state'] == 'online'"
+        paced "bedrock: v6 literal bare"    json "$API/ping?ip=$V6&port=19132&host=$HOST" "d['state'] == 'online'"
+        paced "bedrock: v6 literal bracketed" json "$API/ping?ip=%5B$V6%5D&port=19132&host=$HOST" "d['state'] == 'online'"
+        paced "bedrock: second call cached" json "$API/ping?ip=$V4&port=19132&host=$HOST" "d.get('cached') and d['age_s'] >= 0"
     else
         skip "bedrock: LIVE_BEDROCK_HOST is not set"
     fi
     if [ -n "$JAVA_HOST" ]; then
-        check "java: name, IPv4 online"     json "$API/ping?host=$JAVA_HOST&family=4&port=25565&edition=java" "d['state'] == 'online'"
-        check "java: name, IPv6 online or no record" json "$API/ping?host=$JAVA_HOST&family=6&port=25565&edition=java" "d['state'] in ('online', 'no_dns')"
+        paced "java: name, IPv4 online"     json "$API/ping?host=$JAVA_HOST&family=4&port=25565&edition=java" "d['state'] == 'online'"
+        paced "java: name, IPv6 online or no record" json "$API/ping?host=$JAVA_HOST&family=6&port=25565&edition=java" "d['state'] in ('online', 'no_dns')"
     else
         skip "java: LIVE_JAVA_HOST is not set"
     fi
-    check "ping: offline target"        json "$API/ping?ip=192.0.2.1&port=1&edition=java" "d['state'] == 'offline'"
+    paced "ping: offline target"        json "$API/ping?ip=192.0.2.1&port=1&edition=java" "d['state'] == 'offline'"
     check "ping: invalid ip -> 400"     is "$API/ping?ip=nope&port=1" 400
     check "ping: invalid port -> 400"   is "$API/ping?ip=192.0.2.1&port=70000" 400
     if [ -n "$WEB" ]; then
@@ -120,12 +125,13 @@ if [ -n "$API" ]; then
         check "cors: Retry-After readable"  header "$headers" "^access-control-expose-headers: retry-after\$"
     fi
     check "internal target -> 400"      is "$API/ping?ip=127.0.0.1&port=22&edition=java" 400
-    check "internal name -> no_dns"     json "$API/ping?host=localtest.me&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
-    check "local name, no lookup"       json "$API/ping?host=localhost&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
+    paced "internal name -> no_dns"     json "$API/ping?host=localtest.me&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
+    paced "local name, no lookup"       json "$API/ping?host=localhost&family=4&port=22&edition=java" "d['state'] == 'no_dns'"
     check "no resolve endpoint -> 404"  is "$API/resolve?host=example.org" 404
     check "unknown endpoint -> 404"     is "$API/nope" 404
     check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/ping?ip=nope&port=1' | grep -qiE '^(server|via):'"
     check "landing page shows version"  sh -c "curl -s '$API/' | grep -q 'id=\"api-version\">v'"
+    sleep 4
     apiv=$(curl -s "$API/health" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["version"])')
     if [ -n "$EXPECT_VERSION" ]; then
         check "deployed version is $EXPECT_VERSION" [ "$apiv" = "$EXPECT_VERSION" ]
