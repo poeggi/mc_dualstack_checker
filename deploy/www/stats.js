@@ -5,10 +5,10 @@
 // per kind of period: a bar chart of requests or unique clients, split by
 // IP version or by cache use (two switches pick), with a scale, and a
 // table. The data lists the newest period first; the chart shows it
-// rightmost.
+// rightmost. Each chart spans as many periods as the backend keeps.
 var KINDS = [
-    ["minutes", "Last 60 minutes"], ["hours", "Last 48 hours"],
-    ["days", "Last 30 days"], ["months", "Last 12 months"]
+    ["minutes", "Last 60 minutes", 60], ["hours", "Last 48 hours", 48],
+    ["days", "Last 30 days", 30], ["months", "Last 12 months", 12]
 ];
 
 // The splits: CSS class, name, field of a period.
@@ -168,15 +168,37 @@ function table(kind, rows) {
     return t;
 }
 
+// before is the start of the period before the one starting at start.
+function before(kind, start) {
+    var d = new Date(start);
+    if (kind === "minutes") return new Date(d - 60000);
+    if (kind === "hours") return new Date(d - 3600000);
+    if (kind === "days") return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - 1));
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
+}
+
+// padded is rows followed by empty older periods, n in all.
+function padded(kind, rows, n) {
+    var all = rows.slice();
+    while (all.length < n) {
+        all.push({
+            start: before(kind, all[all.length - 1].start).toISOString(),
+            ipv4: { requests: 0, clients: 0 }, ipv6: { requests: 0, clients: 0 }
+        });
+    }
+    return all;
+}
+
 function fill(s, kind, rows) {
     if (!rows.length) {
         s.appendChild(el("p", "empty", "No finished period yet."));
         return;
     }
-    s.appendChild(chart(kind, rows));
+    var all = padded(kind, rows, spans[kind]);
+    s.appendChild(chart(kind, all));
     var axis = el("div", "axis");
-    axis.appendChild(el("span", "", label(kind, rows[rows.length - 1].start)));
-    axis.appendChild(el("span", "", label(kind, rows[0].start)));
+    axis.appendChild(el("span", "", label(kind, all[all.length - 1].start)));
+    axis.appendChild(el("span", "", label(kind, all[0].start)));
     s.appendChild(axis);
     var details = el("details");
     details.appendChild(el("summary", "", "Numbers"));
@@ -188,7 +210,7 @@ document.addEventListener("click", unpick);
 
 var box = document.getElementById("stats");
 box.textContent = "";
-var sections = {}, loaded = {};
+var sections = {}, loaded = {}, spans = {};
 
 // legend shows the keys of the chart's split.
 function legend() {
@@ -214,6 +236,7 @@ KINDS.forEach(function (k) {
     s.appendChild(el("h2", "", k[1]));
     box.appendChild(s);
     sections[k[0]] = s;
+    spans[k[0]] = k[2];
     fetch("stats/" + k[0] + ".json", { cache: "no-cache" }).then(function (res) {
         if (!res.ok) throw new Error(res.status);
         return res.json();
