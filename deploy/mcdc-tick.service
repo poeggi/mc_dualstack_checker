@@ -5,5 +5,5 @@ Description=mc_dualstack_check release pull and free-tier keep-alive
 Type=oneshot
 ExecStart=/usr/local/bin/mcdc-tick
 Nice=19
-TimeoutStartSec=3min
+TimeoutStartSec=6min
 PrivateTmp=yes

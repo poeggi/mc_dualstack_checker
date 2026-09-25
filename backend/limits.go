@@ -5,7 +5,8 @@ package main
 // Protection for the endpoints: a 60 s result cache that coalesces
 // identical probes, a per-client cooldown after too many distinct systems
 // or health requests, a per-client request budget, a global cap on
-// in-flight probes, and a filter that keeps probes off internal networks.
+// in-flight probes and name lookups, and a filter that keeps probes off
+// internal networks.
 
 import (
 	"context"
@@ -221,7 +222,7 @@ func secondsUntil(t, now time.Time) int {
 
 var inFlight = make(chan struct{}, maxInFlight)
 
-func acquireProbe() bool {
+func acquireSlot() bool {
 	select {
 	case inFlight <- struct{}{}:
 		return true
@@ -230,7 +231,7 @@ func acquireProbe() bool {
 	}
 }
 
-func releaseProbe() { <-inFlight }
+func releaseSlot() { <-inFlight }
 
 // -- target filter -------------------------------------------------
 

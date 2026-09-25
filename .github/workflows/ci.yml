@@ -37,4 +37,4 @@ jobs:
       - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh
       - name: ascii only
         run: |
-          ! LC_ALL=C grep -rn '[^ -~	]' frontend/*.js frontend/*.html frontend/*.css frontend/*.php backend/*.go deploy/ test/ README.md docs/
+          ! git ls-files -z ':!*.png' | xargs -0 env LC_ALL=C grep -n '[^ -~	]'

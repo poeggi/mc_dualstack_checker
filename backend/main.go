@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// mc_dualstack_check backend. The one network primitive the browser cannot
-// do itself: a Minecraft status probe. Everything else (fallback order,
-// dual-stack logic, rendering) lives in the frontend. The API is documented
-// in docs/api.md.
+// mc_dualstack_check backend. It does the network work the browser cannot:
+// a name lookup per address family and a Minecraft status probe. Everything
+// else (fallback order, dual-stack logic, rendering) lives in the frontend.
+// The API is documented in docs/api.md.
 //
 //	GET /ping?ip=<addr>&port=<n>&edition=bedrock|java     -> one probe, cached 60 s
 //	GET /ping?host=<name>&family=4|6&port=<n>&edition=... -> the same, resolved here
@@ -206,8 +206,14 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	var ip net.IP
 	family := ""
 	if raw := q.Get("ip"); raw != "" {
-		if ip = net.ParseIP(strings.Trim(raw, "[]")); ip == nil {
+		lit := strings.Trim(raw, "[]")
+		if ip = net.ParseIP(lit); ip == nil {
 			httpError(w, http.StatusBadRequest, "ip must be a literal IPv4 or IPv6 address")
+			return
+		}
+		// It would be probed over IPv4 while asked for as IPv6.
+		if ip.To4() != nil && strings.Contains(lit, ":") {
+			httpError(w, http.StatusBadRequest, "ip is an IPv4-mapped IPv6 address; give the IPv4 address")
 			return
 		}
 		if filterInternal && internalTarget(ip) {
@@ -236,12 +242,12 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 
 	if ip == nil {
 		// A lookup takes one of the in-flight slots while it runs.
-		if !acquireProbe() {
+		if !acquireSlot() {
 			busy(w)
 			return
 		}
 		ip, err = resolveFamily(r.Context(), host, family)
-		releaseProbe()
+		releaseSlot()
 		switch {
 		case err != nil:
 			writeJSON(w, PingResult{State: "dns_error", Error: lookupReason(err)})
@@ -258,10 +264,10 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	key := edition + "|" + ip.String() + "|" + strconv.Itoa(port)
 	res := cache.get(ctx, key, func() (PingResult, bool) {
-		if !acquireProbe() {
+		if !acquireSlot() {
 			return PingResult{State: "busy"}, false
 		}
-		defer releaseProbe()
+		defer releaseSlot()
 		return ping(ctx, edition, ip, port, host), true
 	})
 	if res.State == "busy" {

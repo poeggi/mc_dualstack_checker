@@ -63,6 +63,7 @@ for t in 127.0.0.1 10.1.2.3 100.64.0.1 169.254.169.254 172.16.0.1 192.168.1.1 0.
 done
 check "name of an internal address -> no_dns" json "$F/ping?host=localtest.me&family=4&port=9&edition=java" "d['state'] == 'no_dns' and 'ip' not in d"
 check "public address passes"       is "$F/ping?ip=192.0.2.1&port=9&edition=java" 200
+check "IPv4-mapped address -> 400"  is "$F/ping?ip=::ffff:192.0.2.1&port=9&edition=java" 400
 
 echo "== cache"
 check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d.get('cached') and d['age_s'] >= 0"

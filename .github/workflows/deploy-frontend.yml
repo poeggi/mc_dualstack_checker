@@ -3,9 +3,10 @@ name: Deploy frontend
 # Uploads frontend/ to the web host via FTPS on every published release.
 # lftp, not curl or basic-ftp: the host resets the data socket for those.
 # Required GitHub secrets: FTP_HOST, FTP_USER, FTP_PASS
-# Required GitHub variables: FTP_TARGET_DIR (./ when the FTP user is jailed at the target folder)
-# Optional: MC_BACKEND (backend URL; empty = page says no backend is configured),
-# LIVE_URL (post-deploy check)
+# Optional GitHub variables: FTP_TARGET_DIR (default ./, for an FTP user
+# jailed at the target folder), MC_BACKEND (backend URL; empty = page says
+# no backend is configured), LIVE_URL (page URL with a trailing slash,
+# post-deploy check)
 
 on:
   release:

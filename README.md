@@ -10,6 +10,8 @@ https://www.poggensee.it/mc_dualstack_check/
 Live Backend Service API: 
 https://mcdscheck-api.poggensee.it/
 
+The live instance is free to use for non-commercial users or purposes only.
+
 Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone who runs a modified copy, also as a network service, has to offer its source under the same terms.
 
 ## Design principles
@@ -31,13 +33,13 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once.
 
-The browser only ever talks to the web host. The frontend relay serves the page only, at `api/<endpoint>`:
+The browser only ever talks to the web host. The frontend relay is there for the page. It answers at `api/<endpoint>`:
 
 - `api/config`: `{"backend": true | false, "version": "..."}`, whether a backend is configured and the release.
 - `api/ping`: passed to the backend at `MC_BACKEND` with the client's address, the answer and status code unchanged. Only the parameters of `/ping` are passed on.
-- `api/health`: one copy of the backend's `/health` for all visitors, refreshed at most every 7 s and asked for as the web host. Visitors' reloads never count against the backend's health limit.
+- `api/health`: one copy of the backend's `/health` for all visitors, refreshed at most every 7 s and asked for as the web host. Visitors' reloads do not count against the backend's health limit. Without a usable cache file, each request is passed on.
 
-The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It does no DNS itself.
+The relay answers `404` for unknown endpoints, `502` when the backend is unreachable and `503` when none is configured. It looks up no server names itself.
 
 Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state. The page keeps the backend's health for 30 s per tab.
 
@@ -57,12 +59,14 @@ cd frontend && php -S localhost:8000 api.php
 
 `frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it.
 
-The backend listens on `127.0.0.1` only. It does not probe internal addresses. To check a server on the local network, start it with `FILTER_INTERNAL_TARGETS=false`.
+The backend listens on `127.0.0.1` only. It does not probe internal addresses. To check a server on the local network, start it with `FILTER_INTERNAL_TARGETS=false`. Local names such as `.lan` still stay unresolved; use the server's IP address.
 
 ## Tests
 
-- `cd backend && go test ./...` checks how failed probes are classified. CI runs it on every push.
-- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits. CI runs it on every push.
+- `cd backend && go test ./...` checks how failed probes are classified, the chat nesting limit and text clipping.
+- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, name lookups, the internal-address filter, the cache and the limits.
+
+CI runs both on pushes to main and on pull requests.
 - `sh test/live.sh` checks the deployed web interface and API end to end (hostnames, IPv4 and IPv6 literals, Bedrock and Java, versions). The "Live check" workflow runs it after each frontend deploy, once it sees the released version on the VM, plus daily and on demand.
 
 ## Deployment
@@ -93,12 +97,12 @@ So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next re
 
 Caddy serves the API publicly plus a landing page from `deploy/www/`, and trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
 
-The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs `deploy/` into `deploy.tar.gz`, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
+The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the VM's deploy files into `deploy.tar.gz`, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
 
 ### Frontend (FTPS to the web host)
 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
-Variables: `FTP_TARGET_DIR` (`./` when the FTP user is jailed at the target folder), `MC_BACKEND` (backend URL; empty disables checks), `LIVE_URL` (optional, verifies the upload).
+Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at the target folder), `MC_BACKEND` (backend URL; empty disables checks), `LIVE_URL` (optional, the page URL with a trailing slash, verifies the upload).
 
 The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into the frontend config before upload; the page shows the version in the footer.
 

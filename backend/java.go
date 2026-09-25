@@ -18,7 +18,7 @@ import (
 const (
 	javaIOTimeout = 3 * time.Second
 	// Clients accept at most 32767 characters of status JSON, favicon
-	// included: 96 KiB in UTF-8.
+	// included: 96 KiB in UTF-8. The cap leaves headroom above that.
 	javaMaxResponse = 128 << 10
 	// Real descriptions nest a few levels; each level parses its subtree
 	// again, so deep nesting would cost depth times size.
