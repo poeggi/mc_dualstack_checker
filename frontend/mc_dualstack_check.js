@@ -297,16 +297,17 @@ function keep(key, entry) {
 // loadHealth answers from the tab's kept health while it is young and
 // from the same release, so reloads do not ask again.
 // hostHealth asks this host for its copy of the backend's health. It
-// resolves to { up, data, current }: up when the web host reached the
-// backend, current when the copy is at most HOST_HEALTH_TTL old.
+// resolves to { up, data, known, current }: up when the web host reached
+// the backend, known when a copy exists, current when the copy is at most
+// HOST_HEALTH_TTL old.
 function hostHealth() {
     return fetch("api/health", { cache: "no-store" }).then(function (res) {
         var age = parseInt(res.headers.get("Age"), 10);
         return res.json().catch(function () { return {}; }).then(function (body) {
-            return { up: res.ok && !!body.ok, data: body, current: age <= HOST_HEALTH_TTL };
+            return { up: res.ok && !!body.ok, data: body, known: !isNaN(age), current: age <= HOST_HEALTH_TTL };
         });
     }, function () {
-        return { up: false, data: {}, current: true };
+        return { up: false, data: {}, known: true, current: true };
     });
 }
 
@@ -320,16 +321,35 @@ function currentHealth() {
     });
 }
 
+// showHealth puts the backend's version, or "API unavailable", into the
+// footer, and warns when the backend has no IPv6.
+function showHealth(h) {
+    $("version").textContent = (pageVersion || "dev") + ", " + (h.up ? "API " + h.data.version : "API unavailable");
+    $("notice-backend").hidden = true;
+    if (h.up && h.data.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
+}
+
+// loadHealth shows the web host's copy at once, also an older one, and
+// the refreshed copy once the web host has it. Only without any copy does
+// the footer wait.
 function loadHealth() {
     var now = Math.floor(Date.now() / 1000);
     try {
         var kept = JSON.parse(sessionStorage.getItem("health") || "null");
-        if (kept && kept.release === pageVersion && now - kept.at < HEALTH_SECONDS) return Promise.resolve(kept.data);
+        if (kept && kept.release === pageVersion && now - kept.at < HEALTH_SECONDS) {
+            showHealth({ up: true, data: kept.data });
+            return;
+        }
     } catch (e) {}
-    return currentHealth().then(function (h) {
-        if (!h.up) throw h;
+    var keep = function (h) {
+        showHealth(h);
+        if (!h.up) return;
         try { sessionStorage.setItem("health", JSON.stringify({ release: pageVersion, at: now, data: h.data })); } catch (e) {}
-        return h.data;
+    };
+    hostHealth().then(function (h) {
+        if (h.current) return keep(h);
+        if (h.known) showHealth(h);
+        new Promise(function (resolve) { setTimeout(resolve, HOST_REFRESH_MS); }).then(hostHealth).then(keep);
     });
 }
 
@@ -565,11 +585,5 @@ api("config").then(function (cfg) {
     backendReady = false;
 }).then(function () {
     loadFromURL();
-    if (!backendReady) return;
-    loadHealth().then(function (h) {
-        if (h.version) $("version").textContent += ", API " + h.version;
-        if (h.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
-    }, function () {
-        $("version").textContent += ", API unavailable";
-    });
+    if (backendReady) loadHealth();
 });
