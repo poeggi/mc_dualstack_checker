@@ -112,8 +112,10 @@ function setBusy(busy) {
     $("checking-indicator").hidden = !busy;
 }
 
-function showNotice(msg) {
+// showNotice shows msg in the notice box, red unless kind is "ok".
+function showNotice(msg, kind) {
     var n = $("notice");
+    n.className = "notice-" + (kind || "error");
     n.textContent = msg ? "\u26A0 " + msg : "";
     n.hidden = !msg;
 }
@@ -394,7 +396,7 @@ function startRetryCountdown(secs) {
             clearInterval(retryTimer); retryTimer = null;
             setBusy(false);
             label.textContent = "Checking\u2026";
-            showNotice("Too many requests - ready, try again.");
+            showNotice("OK - ready to try again.", "ok");
             return;
         }
         showNotice("Too many requests, slow down!");

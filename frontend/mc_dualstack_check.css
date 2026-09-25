@@ -196,13 +196,15 @@ button.btn-active::after {
 
 /* Notices */
 .notice-error,
-.notice-warn {
+.notice-warn,
+.notice-ok {
     border: 1px solid;
     border-radius: var(--radius);
     padding: .6rem 1rem;
 }
 .notice-error { color: var(--red);   background: var(--red-bg);   border-color: var(--red); }
 .notice-warn  { color: var(--amber); background: var(--amber-bg); border-color: var(--amber); }
+.notice-ok    { color: var(--green); background: var(--green-bg); border-color: var(--green); }
 
 /* Checking indicator */
 .checking-indicator {
