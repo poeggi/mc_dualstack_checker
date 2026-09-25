@@ -30,12 +30,15 @@ check() {
     label=$1; shift
     if "$@" >/dev/null 2>&1; then ok "$label"; else fail "$label"; fi
 }
+# CLIENT is the forwarded client address. Each section uses its own, so
+# the budget and the systems limit of one never reach into another.
 status() { curl -s -o /dev/null -w '%{http_code}' -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1"; }
 is() { [ "$(status "$1")" = "$2" ]; }
 json() { curl -s -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
 
 echo "== endpoints"
-check "health"                      json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
+CLIENT=198.51.100.1
+check "health"                    json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
 check "usage numbers written at start" "$PY" -c "import json,sys; sys.exit(0 if all(isinstance(json.load(open(sys.argv[1] + '/stats/' + k + '.json'))['periods'], list) for k in ('minutes','hours','days','months')) else 1)" "$STATS"
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
@@ -47,17 +50,20 @@ check "unknown endpoint: JSON error" json "$B/nope" "d['error']"
 check "POST -> 405 with JSON"       sh -c "curl -s -X POST -w '%{http_code}' '$B/ping' | tr -d '\n' | grep -q '\"error\".*405\$'"
 
 echo "== name lookups (localtest.me is public DNS for 127.0.0.1)"
+CLIENT=198.51.100.2
 check "name resolved by the backend" json "$B/ping?host=localtest.me&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1' and d['state'] == 'offline'"
 check "trailing dot accepted"       json "$B/ping?host=LocalTest.me.&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1'"
 check "name without family -> 400"  is "$B/ping?host=localtest.me&port=9" 400
 check "neither ip nor host -> 400"  is "$B/ping?port=9" 400
 check "invalid name -> 400"         is "$B/ping?host=bad_name.example.com&family=4&port=9" 400
 check "missing record -> no_dns"    json "$B/ping?host=does-not-exist-7f3a.poggensee.it&family=4&port=9" "d['state'] == 'no_dns'"
+CLIENT=198.51.100.3
 check "single label, no lookup"     json "$B/ping?host=localhost&family=4&port=9" "d['state'] == 'no_dns'"
 check "local domain, no lookup"     json "$B/ping?host=printer.local&family=4&port=9" "d['state'] == 'no_dns'"
 check "internal domain, no lookup"  json "$B/ping?host=db.internal&family=6&port=9" "d['state'] == 'no_dns'"
 
 echo "== internal-address filter (default on)"
+CLIENT=198.51.100.4
 for t in 127.0.0.1 10.1.2.3 100.64.0.1 169.254.169.254 172.16.0.1 192.168.1.1 0.0.0.1 \
          224.0.0.1 255.255.255.255 ::1 :: fd00::1 fe80::1 fec0::1 ff02::1 \
          ::ffff:127.0.0.1 64:ff9b::a00:1; do
@@ -68,13 +74,18 @@ check "public address passes"       is "$F/ping?ip=192.0.2.1&port=9&edition=java
 check "IPv4-mapped address -> 400"  is "$F/ping?ip=::ffff:192.0.2.1&port=9&edition=java" 400
 
 echo "== cache"
+CLIENT=198.51.100.1
 check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d.get('cached') and d['age_s'] >= 0"
 
 echo "== limits"
+CLIENT=203.0.113.6
+for i in 1 2 3 4 5 6 7 8; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
+check "budget: 9th request at once -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
+check "429 names the budget"        json "$B/health" "'slow down' in d['error']"
 CLIENT=203.0.113.7
-for i in 1 2 3 4 5 6 7 8 9 10; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
-check "10 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200
-check "11th system -> 429"          is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys11.example" 429
+for i in 1 2 3 4; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
+check "4 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200
+check "5th system -> 429"           is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys5.example" 429
 check "429 names the systems limit" json "$B/health" "'systems' in d['error']"
 check "cooldown carries Retry-After" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | grep -qi '^Retry-After: '"
 CLIENT=203.0.113.8

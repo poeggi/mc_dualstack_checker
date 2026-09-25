@@ -33,7 +33,7 @@ Co-developed with Claude, Anthropic's AI assistant.
 
 ## API
 
-The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once. Anonymous usage numbers are at `/stats` on the API host.
+The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 4 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 8, refilled by 2 every 7 s. At most 128 probes and name lookups run at once. Anonymous usage numbers are at `/stats` on the API host.
 
 The page sends its probes straight to the API. The web host keeps one copy of the backend's `/health` for all visitors. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend. The deploy keeps the copy.
 

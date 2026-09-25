@@ -20,10 +20,10 @@ const (
 	cacheTTL      = 60 * time.Second
 	cacheMax      = 10000
 	systemsWindow = 60 * time.Second
-	systemsMax    = 10
+	systemsMax    = 4
 	cooldown      = 60 * time.Second
-	rlBurst       = 20
-	rlRefill      = time.Second
+	rlBurst       = 8
+	rlRefill      = 7 * time.Second / 2 // 2 tokens per 7 s
 	clientIdle    = 2 * time.Minute
 	clientsMax    = 10000
 	healthMax     = 4

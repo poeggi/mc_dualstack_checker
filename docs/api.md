@@ -108,9 +108,9 @@ Probe results are cached for 60 seconds per `edition`, address and `port`, onlin
 
 Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are charged for their own address, so visitors of the web interface for theirs. When the web interface's host passes a request on, it forwards the visitor's address.
 
-- **Distinct systems.** More than 10 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
+- **Distinct systems.** More than 4 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
 - **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.
-- **Request budget.** 20 requests, refilled at one per second. Over it: `429` with `Retry-After`.
+- **Request budget.** 8 requests, refilled by 2 every 7 seconds. Over it: `429` with `Retry-After`.
 
 During a cooldown every valid request answers `429` with `Retry-After`.
 
