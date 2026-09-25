@@ -37,6 +37,20 @@ is() { [ "$(status "$1")" = "$2" ]; }
 header() { printf '%s\n' "$1" | tr -d '\r' | grep -qi "$2"; }
 # json <url> <python expression over d>: exits 0 when the expression is true
 json() { curl -s "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
+# has <json> <python expression over d>: exits 0 when the expression is true
+has() { printf '%s' "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
+# host_health: the body of the web host's health copy. A copy that is not
+# current (no Age, or older than 7 s) is asked for again after the web
+# host has refreshed it.
+host_health() {
+    h=$(curl -s -D - "$WEB/api/health" | tr -d '\r')
+    age=$(printf '%s\n' "$h" | sed -n 's/^[Aa]ge: *//p')
+    if [ -z "$age" ] || [ "$age" -gt 7 ]; then
+        sleep 7
+        h=$(curl -s -D - "$WEB/api/health" | tr -d '\r')
+    fi
+    printf '%s\n' "$h" | sed '1,/^$/d'
+}
 # address <family>: the address the API probes for HOST in that family
 address() {
     curl -s "$API/ping?host=$HOST&family=$1&port=19132" |
@@ -54,7 +68,7 @@ if [ -n "$WEB" ]; then
     else
         check "config names an API"     json "$WEB/api/config" "d['backend'] and d['version']"
     fi
-    check "health copy: ok, ipv6"   json "$WEB/api/health" "d['ok'] and d['ipv6']"
+    check "health copy: ok, ipv6"   has "$(host_health)" "d['ok'] and d['ipv6']"
     check "no probe relay -> 404"   is "$WEB/api/ping?ip=192.0.2.1&port=1" 404
     check "unknown endpoint -> 404" is "$WEB/api/nope" 404
     check "scripts hidden by name"  is "$WEB/api.php" 404
