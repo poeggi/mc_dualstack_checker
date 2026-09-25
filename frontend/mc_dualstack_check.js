@@ -18,6 +18,9 @@ var REUSE_DELAY_MS = 100;
 // is served, within HOST_REFRESH_MS.
 var HOST_HEALTH_TTL = 7;
 var HOST_REFRESH_MS = 6500;
+// Milliseconds the page waits for the backend's answer to a probe. The
+// backend answers within 12 s: a name lookup and a probe take at most 10 s.
+var PROBE_TIMEOUT_MS = 12000;
 // Default ports per edition. The IPv6 port defaults to the IPv4 port;
 // Bedrock servers commonly listen on 19133 for IPv6, so that is the first
 // IPv6 fallback.
@@ -154,19 +157,26 @@ function fillForm(q) {
 }
 
 // -- API ---------------------------------------------------------
-// Probes go straight to the backend at apiBase. Errors are thrown as
+// Probes go straight to the backend at apiBase. An answer that takes
+// longer than PROBE_TIMEOUT_MS counts as unreachable. Errors are thrown as
 // { rateLimited, retry } | { unreachable } | { message }.
 function api(endpoint, params) {
     var q = new URLSearchParams(params || {}).toString();
-    return fetch(apiBase + "/" + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, PROBE_TIMEOUT_MS);
+    return fetch(apiBase + "/" + endpoint + (q ? "?" + q : ""), { cache: "no-store", signal: ctrl.signal }).then(
         function (res) {
             return res.json().catch(function () { return {}; }).then(function (body) {
+                clearTimeout(timer);
                 if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
                 if (!res.ok) throw { message: body.error || ("Request failed (" + res.status + ")") };
                 return body;
             });
         },
-        function () { throw { unreachable: true }; }
+        function () {
+            clearTimeout(timer);
+            throw { unreachable: true };
+        }
     );
 }
 
