@@ -28,18 +28,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: write config.php
-        # Both values end up inside PHP string literals.
+      - name: write the settings into config.php and the page
+        # The values end up inside PHP string literals, HTML attributes and
+        # sed replacements.
         env:
           MC_BACKEND: ${{ vars.MC_BACKEND }}
           VERSION: ${{ github.event.release.tag_name || 'manual' }}
         run: |
           for v in "$MC_BACKEND" "$VERSION"; do
-            case "$v" in *"'"*|*\\*) echo "quote or backslash in a config value" >&2; exit 1 ;; esac
+            case "$v" in *[\'\"\\\&\|\<\>]*) echo "unexpected character in a config value" >&2; exit 1 ;; esac
           done
           printf "<?php\ndefine('MC_BACKEND', '%s');\ndefine('MC_VERSION', '%s');\n" \
             "$MC_BACKEND" "$VERSION" > frontend/config.php
+          sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"${MC_BACKEND%/}\"|" \
+                 -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
+                 -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" frontend/index.html
           cat frontend/config.php
+          grep -F "<body data-api=\"${MC_BACKEND%/}\" data-version=\"$VERSION\">" frontend/index.html
 
       - name: install lftp
         # The runner image carries a Google Chrome apt source whose hash

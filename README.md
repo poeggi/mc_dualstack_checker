@@ -25,7 +25,7 @@ Co-developed with Claude, Anthropic's AI assistant.
 ## Layout
 
 - `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. One static binary.
-- `frontend/` - the page (`index.php`) and `api.php` for the web host. `.htaccess` sets up the web host.
+- `frontend/` - the page plus `api.php` for the web host. `.htaccess` sets up the web host.
 - `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
@@ -37,9 +37,9 @@ The public API is the backend, documented in [docs/api.md](docs/api.md): the end
 
 The page sends its probes straight to the API. The web host keeps one copy of the backend's `/health` for all visitors. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend. The deploy keeps the copy.
 
-`index.php` puts the settings and this copy into the page: the API address, the page version, and the backend's version and IPv6 state for the footer. Opening the page needs no further request.
+The page is a static file. The deploy writes the API address and the page version into it. On load, the page asks `api/backend-health` once and shows the backend's version, or "API unavailable", in the footer.
 
-`api/backend-health` answers with the copy, its age in the `Age` header, for the page when a probe fails and for anyone who wants to check. It answers `502` when the web host could not reach the API, and `503` when none is configured or no copy exists yet. Other `api/` paths answer `404`. The web host looks up no server names itself.
+`api/backend-health` answers with the copy, its age in the `Age` header. The page asks it on load and when a probe fails; anyone else may ask it too. It answers `502` when the web host could not reach the API, and `503` when none is configured or no copy exists yet. Other `api/` paths answer `404`. The web host looks up no server names itself.
 
 When a probe cannot reach the API, or gets no answer within 12 s, the page asks `api/backend-health`. If that copy is older than 7 s, it asks once more after 6.5 s. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it."
 
@@ -47,7 +47,7 @@ Frontend behaviour: a literal IP skips DNS and omits the other family. A name is
 
 ## Development and build
 
-The backend is written in Go. The web host part is PHP (`frontend/index.php`, `frontend/api.php`, shared code in `frontend/common.php`, settings in `frontend/config.php`). The page script is plain JavaScript.
+The backend is written in Go. The web host part is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain HTML and JavaScript.
 
 ```bash
 cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
@@ -57,7 +57,7 @@ cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
 cd frontend && php -S localhost:8000 api.php
 ```
 
-`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it, serves `index.php` as the page and hides `.php` files by name. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
+`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files by name. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
 `frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it. The page sends probes to that address from the browser, so the backend must allow the page's origin in `ALLOWED_ORIGINS`.
 
@@ -108,7 +108,7 @@ Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at th
 
 For the live check, optionally add the secrets `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server that is always up) and `LIVE_JAVA_HOST` (a Java server that is always up). Without them, those checks are skipped.
 
-The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into the frontend config before upload; the page shows the version in the footer.
+The workflow writes `MC_BACKEND` and the release tag as `MC_VERSION` into `frontend/config.php` and into the page before upload; the page shows the version in the footer.
 
 ### Release flow
 

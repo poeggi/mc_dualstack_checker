@@ -68,14 +68,12 @@ if [ -n "$WEB" ]; then
         check "page names the API"      header "$page" "data-api=\"$API\""
     fi
     check "page names its version"  header "$page" 'data-version="[^"]'
-    check "page shows the API version" header "$page" 'id="version">[^<]*, API v'
     check "health copy: ok, ipv6"   has "$(host_health)" "d['ok'] and d['ipv6']"
     check "no config endpoint -> 404" is "$WEB/api/config" 404
     check "no probe relay -> 404"   is "$WEB/api/ping?ip=192.0.2.1&port=1" 404
     check "unknown endpoint -> 404" is "$WEB/api/nope" 404
     check "scripts hidden by name"  is "$WEB/api.php" 404
     check "config hidden by name"   is "$WEB/config.php" 404
-    check "page hidden by name"     is "$WEB/index.php" 404
 else
     skip "web interface: WEB is not set"
 fi
