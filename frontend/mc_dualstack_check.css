@@ -289,7 +289,7 @@ button.btn-active::after {
 }
 .ip-row-toggle:hover .toggle-label { color: var(--blue); }
 
-/* Debug log */
+/* Failure log */
 .debug-card { border-color: var(--amber); }
 .debug-card .card-head { color: var(--amber); background: var(--amber-bg); }
 .debug-log {

@@ -14,7 +14,7 @@ Free software under the GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). Anyone wh
 
 ## Design principles
 
-**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the debug log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
+**Thin backend, smart frontend.** The backend does only what the frontend cannot. It keeps nothing but a short in-memory result cache and the rate limits: no stored data, no fallback logic, no rendering. Every request is short, so CPU time stays near zero wherever it runs. All logic (literal IP handling, port fallback order, per-family independence, the failure log, the UI) lives in the frontend: static files plus a relay on the web host, so the browser never talks to third parties. Changing behaviour means editing the page, not redeploying a service.
 
 **Fully dual-stack.** Every hop is reachable over IPv4 and IPv6: the frontend host, the backend endpoint, and the probes. IPv4 and IPv6 are probed independently and never fall back to each other. The public backend runs on a host with native IPv4 and IPv6 egress. If you deploy your own, make sure its host has both. A missing family on the checker host is reported as `no_route`, never as "offline", so the result is honest.
 
