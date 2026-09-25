@@ -25,7 +25,7 @@ Co-developed with Claude, Anthropic's AI assistant.
 ## Layout
 
 - `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. One static binary.
-- `frontend/` - the page plus its helper `api.php` for the web host. `.htaccess` sets up the web host.
+- `frontend/` - the page (`index.php`) and `api.php` for the web host. `.htaccess` sets up the web host.
 - `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
@@ -35,20 +35,19 @@ Co-developed with Claude, Anthropic's AI assistant.
 
 The public API is the backend, documented in [docs/api.md](docs/api.md): the endpoints, the result shapes, the 60 s cache, the name lookup rules, the internal-address filter and the limits. Limits apply per IPv4 address or IPv6 /64. More than 10 systems per minute or more than 4 health requests within 7 s start a 60 s cooldown. The request budget is 20, refilled one per second. At most 128 probes and name lookups run at once. Anonymous usage numbers are at `/stats` on the API host.
 
-The page sends its probes straight to the API. The helper on the web host answers at `api/<endpoint>`:
+The page sends its probes straight to the API. The web host keeps one copy of the backend's `/health` for all visitors. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend. The deploy keeps the copy.
 
-- `api/config`: `{"backend": "<API URL>" | "", "version": "..."}`, the API the page uses (empty when none is configured) and the release.
-- `api/health`: one copy of the backend's `/health` for all visitors, answered at once with its age in the `Age` header. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend, and visitors' reloads never reach it.
+`index.php` puts the settings and this copy into the page: the API address, the page version, and the backend's version and IPv6 state for the footer. Opening the page needs no further request. When the copy was older than 7 s, the page updates the footer after 6.5 s.
 
-The helper answers `404` for unknown endpoints, `502` when the web host could not reach the API, and `503` when none is configured or no health copy exists yet. It looks up no server names itself. The deploy keeps the health copy.
+`api/backend-health` answers with the copy, its age in the `Age` header, for the page when a probe fails and for anyone who wants to check. It answers `502` when the web host could not reach the API, and `503` when none is configured or no copy exists yet. Other `api/` paths answer `404`. The web host looks up no server names itself.
 
-When a probe cannot reach the API, the page asks `api/health` again. If that copy is older than 7 s, it asks once more after 6.5 s, when the web host has refreshed it. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it." The footer shows the API version, or "API unavailable".
+When a probe cannot reach the API, the page asks `api/backend-health`. If that copy is older than 7 s, it asks once more after 6.5 s. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it."
 
-Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state. The page keeps the backend's health for 30 s per tab.
+Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state.
 
 ## Development and build
 
-The backend is written in Go. The web host helper is PHP (`frontend/api.php`, settings in `frontend/config.php`). The page is plain JavaScript.
+The backend is written in Go. The web host part is PHP (`frontend/index.php`, `frontend/api.php`, shared code in `frontend/common.php`, settings in `frontend/config.php`). The page script is plain JavaScript.
 
 ```bash
 cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
@@ -58,7 +57,7 @@ cd backend && ALLOWED_ORIGINS=http://localhost:8000 go run .
 cd frontend && php -S localhost:8000 api.php
 ```
 
-`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it and hides `.php` files. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
+`api.php` doubles as the router of the development server: it answers `api/<endpoint>` and serves the other files, scripts excepted. On the web host, `.htaccess` maps `api/<endpoint>` to it, serves `index.php` as the page and hides `.php` files by name. It also makes browsers revalidate the page, script and stylesheet on every load, so a cached page never meets a newer stylesheet. PHP runs there as CGI, which needs `Options +ExecCGI`.
 
 `frontend/config.php` points at `http://localhost:8080` by default. The frontend deploy overwrites it. The page sends probes to that address from the browser, so the backend must allow the page's origin in `ALLOWED_ORIGINS`.
 

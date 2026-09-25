@@ -43,11 +43,11 @@ has() { printf '%s' "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sy
 # current (no Age, or older than 7 s) is asked for again after the web
 # host has refreshed it.
 host_health() {
-    h=$(curl -s -D - "$WEB/api/health" | tr -d '\r')
+    h=$(curl -s -D - "$WEB/api/backend-health" | tr -d '\r')
     age=$(printf '%s\n' "$h" | sed -n 's/^[Aa]ge: *//p')
     if [ -z "$age" ] || [ "$age" -gt 7 ]; then
         sleep 7
-        h=$(curl -s -D - "$WEB/api/health" | tr -d '\r')
+        h=$(curl -s -D - "$WEB/api/backend-health" | tr -d '\r')
     fi
     printf '%s\n' "$h" | sed '1,/^$/d'
 }
@@ -63,16 +63,19 @@ if [ -n "$WEB" ]; then
     check "script"           is "$WEB/mc_dualstack_check.js" 200
     check "stylesheet"       is "$WEB/mc_dualstack_check.css" 200
     check "icon"             is "$WEB/favicon.svg" 200
+    page=$(curl -s "$WEB/")
     if [ -n "$API" ]; then
-        check "config names the API"    json "$WEB/api/config" "d['backend'] == '$API' and d['version']"
-    else
-        check "config names an API"     json "$WEB/api/config" "d['backend'] and d['version']"
+        check "page names the API"      header "$page" "data-api=\"$API\""
     fi
+    check "page names its version"  header "$page" 'data-version="[^"]'
+    check "page shows the API version" header "$page" 'id="version">[^<]*, API v'
     check "health copy: ok, ipv6"   has "$(host_health)" "d['ok'] and d['ipv6']"
+    check "no config endpoint -> 404" is "$WEB/api/config" 404
     check "no probe relay -> 404"   is "$WEB/api/ping?ip=192.0.2.1&port=1" 404
     check "unknown endpoint -> 404" is "$WEB/api/nope" 404
     check "scripts hidden by name"  is "$WEB/api.php" 404
     check "config hidden by name"   is "$WEB/config.php" 404
+    check "page hidden by name"     is "$WEB/index.php" 404
 else
     skip "web interface: WEB is not set"
 fi
@@ -135,7 +138,7 @@ fi
 
 if [ -n "$WEB" ] && [ -n "$API" ]; then
     echo "== consistency"
-    webv=$(curl -s "$WEB/api/config" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["version"])')
+    webv=$(curl -s "$WEB/" | sed -n 's/.*data-version="\([^"]*\)".*/\1/p')
     pagev=$(curl -s "$API/" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')
     echo "      web $webv, api $apiv, landing page $pagev"
     check "web and api versions match"  [ "$webv" = "$apiv" ]

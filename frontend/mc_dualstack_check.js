@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 "use strict";
 
-// The API's base URL ("" when none is configured) and the page's release,
-// read once at startup from the web host.
-var apiBase = "";
-var backendReady = false;
-var pageVersion = "";
+// The backend's base URL ("" when none is configured) and the page's
+// release, as the web host put them into the page.
+var boot = document.body.dataset;
+var apiBase = boot.api || "";
+var backendReady = apiBase !== "";
+var pageVersion = boot.version || "dev";
 // Seconds the backend caches a probe result.
 var CACHE_TTL = 60;
 // Up to this age of the backend's copy, the page answers a probe itself:
@@ -14,8 +15,6 @@ var REUSE_SECONDS = CACHE_TTL / 2;
 // Milliseconds the page takes to give such an answer, so the check still
 // shows its brief loading state.
 var REUSE_DELAY_MS = 100;
-// Seconds the page keeps the backend's health, per tab and release.
-var HEALTH_SECONDS = 30;
 // The web host's copy of the backend's health counts as current up to
 // HOST_HEALTH_TTL seconds of age. An older copy is refreshed right after it
 // is served, within HOST_REFRESH_MS.
@@ -157,13 +156,11 @@ function fillForm(q) {
 }
 
 // -- API ---------------------------------------------------------
-// Probes go straight to the API at apiBase; config comes from api/config on
-// this host. Errors are thrown as { rateLimited, retry } | { unreachable } |
-// { message }.
+// Probes go straight to the backend at apiBase. Errors are thrown as
+// { rateLimited, retry } | { unreachable } | { message }.
 function api(endpoint, params) {
     var q = new URLSearchParams(params || {}).toString();
-    var base = endpoint === "ping" ? apiBase + "/" : "api/";
-    return fetch(base + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
+    return fetch(apiBase + "/" + endpoint + (q ? "?" + q : ""), { cache: "no-store" }).then(
         function (res) {
             return res.json().catch(function () { return {}; }).then(function (body) {
                 if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
@@ -294,14 +291,12 @@ function keep(key, entry) {
     } catch (e) {}
 }
 
-// loadHealth answers from the tab's kept health while it is young and
-// from the same release, so reloads do not ask again.
 // hostHealth asks this host for its copy of the backend's health. It
 // resolves to { up, data, known, current }: up when the web host reached
 // the backend, known when a copy exists, current when the copy is at most
 // HOST_HEALTH_TTL old.
 function hostHealth() {
-    return fetch("api/health", { cache: "no-store" }).then(function (res) {
+    return fetch("api/backend-health", { cache: "no-store" }).then(function (res) {
         var age = parseInt(res.headers.get("Age"), 10);
         return res.json().catch(function () { return {}; }).then(function (body) {
             return { up: res.ok && !!body.ok, data: body, known: !isNaN(age), current: age <= HOST_HEALTH_TTL };
@@ -324,33 +319,10 @@ function currentHealth() {
 // showHealth puts the backend's version, or "API unavailable", into the
 // footer, and warns when the backend has no IPv6.
 function showHealth(h) {
-    $("version").textContent = (pageVersion || "dev") + ", " + (h.up ? "API " + h.data.version : "API unavailable");
-    $("notice-backend").hidden = true;
-    if (h.up && h.data.ipv6 === false) backendNotice("The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.");
-}
-
-// loadHealth shows the web host's copy at once, also an older one, and
-// the refreshed copy once the web host has it. Only without any copy does
-// the footer wait.
-function loadHealth() {
-    var now = Math.floor(Date.now() / 1000);
-    try {
-        var kept = JSON.parse(sessionStorage.getItem("health") || "null");
-        if (kept && kept.release === pageVersion && now - kept.at < HEALTH_SECONDS) {
-            showHealth({ up: true, data: kept.data });
-            return;
-        }
-    } catch (e) {}
-    var keep = function (h) {
-        showHealth(h);
-        if (!h.up) return;
-        try { sessionStorage.setItem("health", JSON.stringify({ release: pageVersion, at: now, data: h.data })); } catch (e) {}
-    };
-    hostHealth().then(function (h) {
-        if (h.current) return keep(h);
-        if (h.known) showHealth(h);
-        new Promise(function (resolve) { setTimeout(resolve, HOST_REFRESH_MS); }).then(hostHealth).then(keep);
-    });
+    $("version").textContent = pageVersion + ", " + (h.up ? "API " + h.data.version : "API unavailable");
+    var n = $("notice-backend");
+    n.hidden = !(h.up && h.data.ipv6 === false);
+    n.textContent = n.hidden ? "" : "\u26A0 The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.";
 }
 
 function runCheck(q) {
@@ -568,22 +540,12 @@ function loadFromURL() {
 }
 window.addEventListener("popstate", loadFromURL);
 
-// Say up front when the backend has no IPv6 and cannot judge IPv6
-// reachability.
-function backendNotice(msg) {
-    var n = $("notice-backend");
-    n.textContent = "\u26A0 " + msg;
-    n.hidden = false;
+// The page came with the web host's copy of the backend's health, already
+// shown in the footer. When that copy was older than HOST_HEALTH_TTL, or
+// missing, the footer is updated once the web host has refreshed it.
+loadFromURL();
+if (backendReady && !(boot.healthAge !== "" && +boot.healthAge <= HOST_HEALTH_TTL)) {
+    setTimeout(function () {
+        hostHealth().then(function (h) { if (h.known) showHealth(h); });
+    }, HOST_REFRESH_MS);
 }
-
-api("config").then(function (cfg) {
-    apiBase = typeof cfg.backend === "string" ? cfg.backend : "";
-    backendReady = apiBase !== "";
-    pageVersion = cfg.version || "";
-    if (cfg.version) $("version").textContent = cfg.version;
-}, function () {
-    backendReady = false;
-}).then(function () {
-    loadFromURL();
-    if (backendReady) loadHealth();
-});

@@ -70,4 +70,4 @@ jobs:
           VERSION: ${{ github.event.release.tag_name || 'manual' }}
         run: |
           test -n "$LIVE_URL" || { echo "LIVE_URL variable not set, skipping"; exit 0; }
-          curl -fsS "${LIVE_URL}api/config" | grep -F "\"version\":\"$VERSION\""
+          curl -fsS "$LIVE_URL" | grep -F "data-version=\"$VERSION\""

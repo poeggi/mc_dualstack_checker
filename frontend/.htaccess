@@ -1,5 +1,6 @@
 # The web host runs PHP as CGI and refuses scripts (403) without this.
 Options +ExecCGI
+DirectoryIndex index.php
 
 # api.php answers at api/<endpoint>. Scripts are not reachable by name.
 RewriteEngine On
@@ -9,17 +10,18 @@ RewriteRule ^api/[^/]+$ api.php [L]
 # Dot files, such as the health copy, are not served.
 RewriteRule (^|/)\. - [R=404,L]
 
-# api/health ends its answer before it refreshes the health copy.
-# Compression would hold the answer back until the script ends.
+# The page and api/backend-health end their answer before they refresh
+# the health copy. Compression would hold the answer back until the script
+# ends.
 <IfModule mod_setenvif.c>
-    SetEnvIf Request_URI "/api/[^/]+$" no-gzip=1
+    SetEnvIf Request_URI "(/|/api/[^/]+)$" no-gzip=1
 </IfModule>
 
-# Page, script and stylesheet change together with each release. Browsers
+# Script and stylesheet change together with each release. Browsers
 # revalidate them on every load (a cheap 304 when unchanged), so a cached
-# page never meets a newer stylesheet.
+# page never meets a newer stylesheet. index.php sends its own header.
 <IfModule mod_headers.c>
-    <FilesMatch "\.(html|css|js)$">
+    <FilesMatch "\.(css|js)$">
         Header set Cache-Control "no-cache"
     </FilesMatch>
 </IfModule>

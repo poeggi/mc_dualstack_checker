@@ -1,3 +1,23 @@
+<?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The page. Its settings and this host's last copy of the backend's health
+// go into the page itself, so opening it needs no further request. An older
+// copy is refreshed after the page has gone out.
+require __DIR__ . '/common.php';
+
+$kept = kept_health();
+$health = $kept !== null && $kept['body'] !== null ? json_decode($kept['body'], true) : null;
+$up = is_array($health) && !empty($health['ok']);
+$footer = MC_VERSION;
+if (MC_BACKEND !== '' && $kept !== null) {
+    $footer .= $up ? ', API ' . ($health['version'] ?? '') : ', API unavailable';
+}
+$noIPv6 = $up && ($health['ipv6'] ?? true) === false;
+
+function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES); }
+
+ob_start();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,7 +31,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <script src="mc_dualstack_check.js" defer></script>
 </head>
-<body><main>
+<body data-api="<?= h(rtrim(MC_BACKEND, '/')) ?>" data-version="<?= h(MC_VERSION) ?>" data-health-age="<?= $kept === null ? '' : $kept['age'] ?>"><main>
 <div class="page">
 
     <header class="header">
@@ -54,7 +74,11 @@
         </div>
     </div>
 
+<?php if ($noIPv6): ?>
+    <div class="notice-warn" id="notice-backend" role="status">&#9888; The checker backend has no IPv6 connectivity. IPv6 results are not meaningful.</div>
+<?php else: ?>
     <div class="notice-warn" id="notice-backend" role="status" hidden></div>
+<?php endif ?>
     <div class="notice-error" id="notice" role="alert" hidden></div>
 
     <div class="checking-indicator text-muted" id="checking-indicator" hidden>
@@ -77,8 +101,15 @@
 
 <footer class="site-footer text-tiny text-muted">
     No data logged/stored beyond short-term caching or standard server access logs.<br>
-    Version <span id="version">dev</span>. <a href="https://github.com/poeggi/mc_dualstack_checker">AGPL-3.0</a>.
+    Version <span id="version"><?= h($footer) ?></span>. <a href="https://github.com/poeggi/mc_dualstack_checker">AGPL-3.0</a>.
 </footer>
 </main>
 </body>
 </html>
+<?php
+finish(200, ob_get_clean(), [
+    'Content-Type: text/html; charset=utf-8',
+    'X-Content-Type-Options: nosniff',
+    'Cache-Control: no-cache',
+]);
+refresh_health($kept);
