@@ -47,6 +47,7 @@ jobs:
           m=$(cat ../deploy/www/*.html | grep -o -F "?v=$TAG\"" | wc -l)
           [ "$n" -gt 0 ] && [ "$n" -eq "$m" ] || { echo "$m of $n stamps carry $TAG" >&2; exit 1; }
           grep -q -F "id=\"api-version\">$TAG<" ../deploy/www/index.html
+          grep -q -F "id=\"api-version\">$TAG<" ../deploy/www/stats.html
           tar -czf ../dist/deploy.tar.gz -C ../deploy \
             Caddyfile mcdc-tick mc-dualstack-check.service mcdc-tick.service mcdc-tick.timer caddy.service www
           (cd ../dist && sha256sum mc_dualstack_check_linux_* deploy.tar.gz > SHA256SUMS && cat SHA256SUMS)

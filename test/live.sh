@@ -137,6 +137,7 @@ if [ -n "$API" ]; then
     pagev=$(curl -s "$API/" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')
     check "landing page includes stamped" [ "$(curl -s "$API/" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
     check "usage page includes stamped" [ "$(curl -s "$API/stats" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
+    check "usage page shows version"    [ "$(curl -s "$API/stats" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')" = "$pagev" ]
     check "script cached for an hour"   header "$(curl -s -D - -o /dev/null "$API/stats.js?v=$pagev")" "^cache-control: public, max-age=3600"
     sleep 4
     apiv=$(curl -s "$API/health" | "$PY" -c 'import sys,json; print(json.load(sys.stdin)["version"])')

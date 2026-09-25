@@ -29,9 +29,9 @@ func TestSketchEstimate(t *testing.T) {
 func TestUsageRoll(t *testing.T) {
 	u := newUsage()
 	t0 := time.Date(2026, 9, 25, 12, 0, 30, 0, time.UTC)
-	u.add(t0, sample{false, "198.51.100.1"})
-	u.add(t0, sample{false, "198.51.100.1"})
-	u.add(t0, sample{true, "2001:db8::/64"})
+	u.add(t0, sample{false, false, "198.51.100.1"})
+	u.add(t0, sample{false, false, "198.51.100.1"})
+	u.add(t0, sample{true, false, "2001:db8::/64"})
 	clear(u.rolled)
 
 	u.roll(t0.Add(time.Minute))
@@ -43,7 +43,7 @@ func TestUsageRoll(t *testing.T) {
 		t.Fatalf("rolled %v, hours %+v", u.rolled, u.Series["hours"].Done)
 	}
 
-	u.add(t0.Add(3*time.Minute), sample{false, "198.51.100.2"})
+	u.add(t0.Add(3*time.Minute), sample{false, false, "198.51.100.2"})
 	m = u.Series["minutes"].Done
 	if len(m) != 3 || m[0].IPv4.Requests != 0 || m[2].IPv4 != (counts{2, 1}) {
 		t.Fatalf("minutes after 3 min: %+v", m)
@@ -56,11 +56,68 @@ func TestUsageRoll(t *testing.T) {
 	}
 }
 
+func TestUsageCacheSplit(t *testing.T) {
+	u := newUsage()
+	t0 := time.Date(2026, 9, 25, 12, 0, 30, 0, time.UTC)
+	u.add(t0, sample{false, false, "198.51.100.1"})
+	u.add(t0, sample{false, true, "198.51.100.1"})
+	u.add(t0, sample{false, true, "198.51.100.2"})
+	u.add(t0, sample{true, false, "2001:db8::/64"})
+
+	u.roll(t0.Add(time.Minute))
+	m := u.Series["minutes"].Done[0]
+	if m.Fresh == nil || m.Cached == nil || *m.Fresh != (counts{2, 2}) || *m.Cached != (counts{2, 1}) {
+		t.Fatalf("finished minute %+v, fresh %+v, cached %+v", m, m.Fresh, m.Cached)
+	}
+	if !strings.Contains(string(u.public("minutes", t0)), `"fresh":{"requests":2,"clients":2},"cached":{"requests":2,"clients":1}`) {
+		t.Fatalf("published %s", u.public("minutes", t0))
+	}
+
+	u.roll(t0.Add(3 * time.Minute))
+	if e := u.Series["minutes"].Done[0]; e.Fresh == nil || *e.Fresh != (counts{}) || *e.Cached != (counts{}) {
+		t.Fatalf("idle minute %+v", e)
+	}
+}
+
+// State kept by a backend that did not split by cache use: the running
+// periods are not split, the next ones are.
+func TestUsageCacheSplitAfterUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, statsPublic), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	u := newUsage()
+	t0 := time.Now().UTC().Truncate(time.Minute)
+	u.add(t0, sample{false, false, "198.51.100.1"})
+	for _, s := range u.Series {
+		s.Fresh, s.Cur.Fresh, s.Cur.Cached = nil, nil, nil
+	}
+	u.publish(dir, t0)
+
+	v := loadUsage(dir)
+	if s := v.Series["minutes"]; len(s.Fresh) != hllM || s.Cur.Fresh != nil || s.Cur.Cached != nil {
+		t.Fatalf("reloaded minutes %+v", s.Cur)
+	}
+	v.add(t0, sample{false, true, "198.51.100.2"})
+	v.add(t0.Add(time.Minute), sample{false, true, "198.51.100.2"})
+	m := v.Series["minutes"].Done[0]
+	if m.IPv4 != (counts{2, 2}) || m.Fresh != nil || m.Cached != nil {
+		t.Fatalf("unsplit minute %+v", m)
+	}
+	if strings.Contains(string(v.public("minutes", t0)), "fresh") {
+		t.Fatalf("unsplit minute published with split: %s", v.public("minutes", t0))
+	}
+	v.roll(t0.Add(2 * time.Minute))
+	if m := v.Series["minutes"].Done[0]; m.Cached == nil || *m.Cached != (counts{1, 1}) || *m.Fresh != (counts{}) {
+		t.Fatalf("split minute %+v", m)
+	}
+}
+
 func TestUsageGapAfterDowntime(t *testing.T) {
 	u := newUsage()
 	t0 := time.Date(2026, 9, 25, 0, 0, 30, 0, time.UTC)
 	for i := 0; i < 72; i++ {
-		u.add(t0.Add(time.Duration(i)*time.Hour), sample{false, "198.51.100.1"})
+		u.add(t0.Add(time.Duration(i)*time.Hour), sample{false, false, "198.51.100.1"})
 	}
 	last := t0.Add(71 * time.Hour)
 
@@ -93,7 +150,7 @@ func TestUsageSurvivesRestart(t *testing.T) {
 	}
 	u := newUsage()
 	now := time.Now()
-	u.add(now, sample{false, "198.51.100.1"})
+	u.add(now, sample{false, false, "198.51.100.1"})
 	u.publish(dir, now)
 
 	v := loadUsage(dir)

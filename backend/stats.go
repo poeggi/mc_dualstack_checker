@@ -3,8 +3,9 @@
 package main
 
 // Anonymous usage numbers: probe requests and unique clients per minute,
-// hour, day and month (UTC), each for IPv4 and IPv6 clients. Unique
-// clients are counted with HyperLogLog sketches, which keep no addresses.
+// hour, day and month (UTC), each split by address family and by cache
+// use. Unique clients are counted with HyperLogLog sketches, which keep no
+// addresses.
 // One worker owns all numbers. Requests hand it a sample without waiting.
 // Only finished periods are published, one file per kind of period under
 // stats/, rewritten when a period of that kind ends; Caddy serves them as
@@ -66,17 +67,28 @@ type counts struct {
 	Clients  uint64 `json:"clients"`
 }
 
+// bucket is one period. Fresh and Cached split its requests by whether the
+// answer came from the result cache. Cached clients are those without a
+// fresh answer. Both are nil when the period was not counted in full.
 type bucket struct {
-	Start time.Time `json:"start"`
-	IPv4  counts    `json:"ipv4"`
-	IPv6  counts    `json:"ipv6"`
+	Start  time.Time `json:"start"`
+	IPv4   counts    `json:"ipv4"`
+	IPv6   counts    `json:"ipv6"`
+	Fresh  *counts   `json:"fresh,omitempty"`
+	Cached *counts   `json:"cached,omitempty"`
 }
 
-// series is one kind of period: the running bucket with its sketches, and
-// the finished buckets, newest first.
+func newBucket(start time.Time) bucket {
+	return bucket{Start: start, Fresh: &counts{}, Cached: &counts{}}
+}
+
+// series is one kind of period: the running bucket with its sketches of
+// clients per family and of clients with a fresh answer, and the finished
+// buckets, newest first.
 type series struct {
 	Cur    bucket
 	Sketch [2]sketch
+	Fresh  sketch
 	Done   []bucket
 }
 
@@ -108,17 +120,18 @@ type usage struct {
 }
 
 type sample struct {
-	v6  bool
-	key string
+	v6     bool
+	cached bool
+	key    string
 }
 
 var samples = make(chan sample, 1024)
 
-// countPing hands one admitted probe request to the stats worker. It never
+// countPing hands one answered probe request to the stats worker. It never
 // waits: when the worker is behind, the sample is dropped.
-func countPing(client string) {
+func countPing(client string, cached bool) {
 	select {
-	case samples <- sample{strings.Contains(client, ":"), client}:
+	case samples <- sample{strings.Contains(client, ":"), cached, client}:
 	default:
 	}
 }
@@ -154,6 +167,10 @@ func loadUsage(dir string) *usage {
 				s.Sketch[f] = newSketch()
 			}
 		}
+		if len(s.Fresh) != hllM || s.Cur.Fresh == nil || s.Cur.Cached == nil {
+			s.Fresh = newSketch()
+			s.Cur.Fresh, s.Cur.Cached = nil, nil
+		}
 		u.Series[k.name] = s
 	}
 	return u
@@ -180,7 +197,7 @@ func (u *usage) roll(now time.Time) {
 	for _, k := range periodKinds {
 		s := u.Series[k.name]
 		if s == nil {
-			s = &series{Sketch: [2]sketch{newSketch(), newSketch()}}
+			s = &series{Sketch: [2]sketch{newSketch(), newSketch()}, Fresh: newSketch()}
 			u.Series[k.name] = s
 		}
 		start := k.start(now)
@@ -192,7 +209,7 @@ func (u *usage) roll(now time.Time) {
 			// Missed periods, newest last; only the newest keep matter.
 			var missed []bucket
 			for t := k.next(s.Cur.Start); t.Before(start); t = k.next(t) {
-				missed = append(missed, bucket{Start: t})
+				missed = append(missed, newBucket(t))
 				if len(missed) > k.keep {
 					missed = missed[1:]
 				}
@@ -204,17 +221,29 @@ func (u *usage) roll(now time.Time) {
 		if len(s.Done) > k.keep {
 			s.Done = s.Done[:k.keep]
 		}
-		s.Cur = bucket{Start: start}
+		s.Cur = newBucket(start)
 		s.Sketch = [2]sketch{newSketch(), newSketch()}
+		s.Fresh = newSketch()
 		u.rolled[k.name] = true
 	}
 }
 
-// finished is the running bucket with its client estimates.
+// finished is the running bucket with its client estimates. The fresh
+// clients are kept within what the exact request counts allow.
 func (s *series) finished() bucket {
 	b := s.Cur
 	b.IPv4.Clients = s.Sketch[0].estimate()
 	b.IPv6.Clients = s.Sketch[1].estimate()
+	if b.Fresh != nil {
+		fresh, cached := *b.Fresh, *b.Cached
+		total := b.IPv4.Clients + b.IPv6.Clients
+		fresh.Clients = min(s.Fresh.estimate(), total, fresh.Requests)
+		if cached.Requests < total {
+			fresh.Clients = max(fresh.Clients, total-cached.Requests)
+		}
+		cached.Clients = total - fresh.Clients
+		b.Fresh, b.Cached = &fresh, &cached
+	}
 	return b
 }
 
@@ -230,6 +259,14 @@ func (u *usage) add(now time.Time, smp sample) {
 		} else {
 			s.Cur.IPv4.Requests++
 			s.Sketch[0].add(h)
+		}
+		switch {
+		case s.Cur.Fresh == nil:
+		case smp.cached:
+			s.Cur.Cached.Requests++
+		default:
+			s.Cur.Fresh.Requests++
+			s.Fresh.add(h)
 		}
 	}
 }

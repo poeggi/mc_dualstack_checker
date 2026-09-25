@@ -2,13 +2,20 @@
 "use strict";
 
 // Draws the finished periods the backend publishes under stats/, one file
-// per kind of period: a bar chart of requests or unique clients (a switch
-// picks), IPv4 and IPv6 stacked, with a scale, and a table with both. The
-// data lists the newest period first; the chart shows it rightmost.
+// per kind of period: a bar chart of requests or unique clients, split by
+// address family or by cache use (two switches pick), with a scale, and a
+// table. The data lists the newest period first; the chart shows it
+// rightmost.
 var KINDS = [
     ["minutes", "Last 60 minutes"], ["hours", "Last 24 hours"],
     ["days", "Last 30 days"], ["months", "Last 12 months"]
 ];
+
+// The splits: CSS class, name, field of a period.
+var SPLITS = {
+    family: [["v4", "IPv4", "ipv4"], ["v6", "IPv6", "ipv6"]],
+    cache: [["fresh", "Fresh", "fresh"], ["cached", "Cached", "cached"]]
+};
 
 function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -30,12 +37,27 @@ function label(kind, start) {
     return ymd.slice(0, 7);
 }
 
-// The number the charts show, "requests" or "clients".
-var metric = "requests";
+// The number the charts show, "requests" or "clients", and the split,
+// "family" or "cache".
+var metric = "requests", split = "family";
 function value(r) { return r.ipv4[metric] + r.ipv6[metric]; }
 
-// One box for all bars: the period's clients per family, absolute and in
-// percent. It follows the mouse, and a tap opens it on touch screens.
+// recorded tells whether a period is split by cache use; periods from
+// before the split was counted are not.
+function recorded(r) { return !!(r.fresh && r.cached); }
+
+// parts is a period's segments in split s.
+function parts(r, s) {
+    if (s === "cache" && !recorded(r)) return [["unrecorded", "Not recorded", value(r)]];
+    return SPLITS[s].map(function (p) {
+        var name = p[0] === "cached" && metric === "clients" ? "Cached only" : p[1];
+        return [p[0], name, r[p[2]][metric]];
+    });
+}
+
+// One box for all bars: the period's number in both splits, the chart's
+// split first, absolute and in percent. It follows the mouse, and a tap
+// opens it on touch screens.
 var tip = el("div", "tip");
 tip.hidden = true;
 document.body.appendChild(tip);
@@ -44,12 +66,16 @@ function showTip(kind, r, e) {
     var total = value(r);
     tip.textContent = "";
     tip.appendChild(el("div", "tip-head", label(kind, r.start)));
-    [["v4", "IPv4", r.ipv4[metric]], ["v6", "IPv6", r.ipv6[metric]]].forEach(function (f) {
-        var line = el("div");
-        line.appendChild(el("span", "key " + f[0]));
-        var pct = total ? " (" + Math.round(f[2] / total * 100) + " %)" : "";
-        line.appendChild(document.createTextNode(" " + f[1] + " " + f[2] + pct));
-        tip.appendChild(line);
+    [split, split === "family" ? "cache" : "family"].forEach(function (s) {
+        var group = el("div", "tip-group");
+        parts(r, s).forEach(function (p) {
+            var line = el("div");
+            line.appendChild(el("span", "key " + p[0]));
+            var pct = total ? " (" + Math.round(p[2] / total * 100) + " %)" : "";
+            line.appendChild(document.createTextNode(" " + p[1] + " " + p[2] + pct));
+            group.appendChild(line);
+        });
+        tip.appendChild(group);
     });
     tip.hidden = false;
     moveTip(e);
@@ -84,9 +110,9 @@ function chart(kind, rows) {
         bar.addEventListener("mousemove", moveTip);
         bar.addEventListener("mouseleave", hideTip);
         bar.addEventListener("click", function (e) { e.stopPropagation(); showTip(kind, r, e); });
-        [["v4", r.ipv4[metric]], ["v6", r.ipv6[metric]]].forEach(function (part) {
-            var seg = el("div", part[0]);
-            seg.style.height = (part[1] / top * 100) + "%";
+        parts(r, split).forEach(function (p) {
+            var seg = el("div", p[0]);
+            seg.style.height = (p[2] / top * 100) + "%";
             bar.appendChild(seg);
         });
         bars.appendChild(bar);
@@ -95,16 +121,23 @@ function chart(kind, rows) {
     return c;
 }
 
+// table shows both numbers of the chart's split.
 function table(kind, rows) {
     var t = el("table"), head = el("tr");
-    ["", "IPv4 clients", "IPv4 requests", "IPv6 clients", "IPv6 requests"].forEach(function (h) {
-        head.appendChild(el("th", "", h));
+    head.appendChild(el("th", "", ""));
+    SPLITS[split].forEach(function (p) {
+        head.appendChild(el("th", "", p[1] + " clients"));
+        head.appendChild(el("th", "", p[1] + " requests"));
     });
     t.appendChild(head);
     rows.forEach(function (r) {
         var tr = el("tr");
-        [label(kind, r.start), r.ipv4.clients, r.ipv4.requests, r.ipv6.clients, r.ipv6.requests]
-            .forEach(function (v) { tr.appendChild(el("td", "", String(v))); });
+        tr.appendChild(el("td", "", label(kind, r.start)));
+        SPLITS[split].forEach(function (p) {
+            var c = r[p[2]];
+            tr.appendChild(el("td", "", c ? String(c.clients) : "-"));
+            tr.appendChild(el("td", "", c ? String(c.requests) : "-"));
+        });
         t.appendChild(tr);
     });
     return t;
@@ -132,6 +165,17 @@ var box = document.getElementById("stats");
 box.textContent = "";
 var sections = {}, loaded = {};
 
+// legend shows the keys of the chart's split; "Not recorded" only while a
+// loaded period lacks the cache split.
+function legend() {
+    var old = Object.keys(loaded).some(function (k) {
+        return loaded[k].some(function (r) { return !recorded(r); });
+    });
+    document.querySelectorAll(".legend > [data-view]").forEach(function (e) {
+        e.hidden = e.dataset.view !== split || (e.id === "unrecorded" && !old);
+    });
+}
+
 // draw fills a section from the loaded data; the numbers table stays open
 // when it was.
 function draw(kind) {
@@ -154,18 +198,23 @@ KINDS.forEach(function (k) {
         return res.json();
     }).then(function (data) {
         loaded[k[0]] = data.periods || [];
+        legend();
         draw(k[0]);
     }, function () {
         s.appendChild(el("p", "empty", "Not available."));
     });
 });
 
-var buttons = document.querySelectorAll(".switch button");
-buttons.forEach(function (b) {
-    b.addEventListener("click", function () {
-        if (b.dataset.metric === metric) return;
-        metric = b.dataset.metric;
-        buttons.forEach(function (o) { o.classList.toggle("on", o === b); });
-        Object.keys(loaded).forEach(draw);
+document.querySelectorAll(".switch").forEach(function (sw) {
+    var buttons = sw.querySelectorAll("button");
+    buttons.forEach(function (b) {
+        b.addEventListener("click", function () {
+            if (b.classList.contains("on")) return;
+            buttons.forEach(function (o) { o.classList.toggle("on", o === b); });
+            if (b.dataset.metric) metric = b.dataset.metric;
+            else split = b.dataset.view;
+            legend();
+            Object.keys(loaded).forEach(draw);
+        });
     });
 });

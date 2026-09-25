@@ -88,14 +88,18 @@ The backend refreshes this status every 7 seconds. A request returns the last re
 
 `/stats` is a page with charts. The numbers behind it are in `/stats/minutes.json`, `/stats/hours.json`, `/stats/days.json` and `/stats/months.json`. The backend writes each file when a period of its kind ends, and the reverse proxy serves them as static files, so reading them costs the backend nothing.
 
-Counted are `/ping` requests that pass the limits, and unique clients, each for IPv4 and IPv6 clients. A client is an IPv4 address or the /64 of an IPv6 address. Unique clients are HyperLogLog estimates, within about 2 %; no addresses are stored. Only finished periods are listed: the last 60 minutes, 24 hours, 30 days and 12 months, in UTC, newest first.
+Counted are `/ping` requests that pass the limits, and unique clients. A client is an IPv4 address or the /64 of an IPv6 address. Unique clients are HyperLogLog estimates, within about 2 %; no addresses are stored. Only finished periods are listed: the last 60 minutes, 24 hours, 30 days and 12 months, in UTC, newest first.
+
+Both numbers are split two ways, and each split adds up to the total. `ipv4` and `ipv6` split by the client's address family. `cached` and `fresh` split by cache use. A request is `cached` when its answer is the cached result, the one marked `cached: true`. All other requests are `fresh`. A client is `cached` when it got no fresh answer in that period. Periods counted before this split existed have no `cached` and `fresh`.
 
 ```json
 {
   "updated": "2026-09-25T12:00:01Z",
   "periods": [
-    {"start": "2026-09-25T11:59:00Z", "ipv4": {"requests": 7, "clients": 3}, "ipv6": {"requests": 4, "clients": 2}},
-    {"start": "2026-09-25T11:58:00Z", "ipv4": {"requests": 12, "clients": 5}, "ipv6": {"requests": 0, "clients": 0}}
+    {"start": "2026-09-25T11:59:00Z", "ipv4": {"requests": 7, "clients": 3}, "ipv6": {"requests": 4, "clients": 2},
+     "fresh": {"requests": 6, "clients": 3}, "cached": {"requests": 5, "clients": 2}},
+    {"start": "2026-09-25T11:58:00Z", "ipv4": {"requests": 12, "clients": 5}, "ipv6": {"requests": 0, "clients": 0},
+     "fresh": {"requests": 12, "clients": 5}, "cached": {"requests": 0, "clients": 0}}
   ]
 }
 ```

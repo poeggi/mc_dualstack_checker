@@ -259,7 +259,9 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	if wait, reason := limits.admitProbe(client, system); limited(w, wait, reason) {
 		return
 	}
-	countPing(client)
+	// Counted once answered; cached when the answer is the cached result.
+	cached := false
+	defer func() { countPing(client, cached) }()
 
 	if ip == nil {
 		// A lookup takes one of the in-flight slots while it runs.
@@ -291,6 +293,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		defer releaseSlot()
 		return ping(ctx, edition, ip, port, host), true
 	})
+	cached = res.Cached
 	if res.State == "busy" {
 		busy(w)
 		return
