@@ -1,8 +1,8 @@
 name: Release backend
 
 # Builds the backend for both VM architectures and attaches the binaries,
-# the VM's deploy files (deploy.tar.gz) and their SHA256SUMS to the
-# release. The VM pulls them itself (deploy/mcdc-tick), so no deploy
+# the VM's deploy files (deploy.tar.gz, its pages stamped with the release)
+# and their SHA256SUMS to the release. The VM pulls them itself (deploy/mcdc-tick), so no deploy
 # credentials exist anywhere. SHA256SUMS goes up last: the VM acts on it.
 
 on:
@@ -35,6 +35,18 @@ jobs:
               -ldflags "-s -w -X main.version=$TAG" \
               -o "../dist/mc_dualstack_check_linux_$arch" .
           done
+          # The pages carry the release: the version field and the ?v=
+          # stamps of their includes. An unstamped include or a missed
+          # stamp stops the release.
+          if grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' ../deploy/www/*.html; then
+            echo "local include without a version stamp" >&2; exit 1
+          fi
+          sed -i -e "s|id=\"api-version\">[^<]*<|id=\"api-version\">$TAG<|" \
+                 -e "s|?v=[^\"]*\"|?v=$TAG\"|g" ../deploy/www/*.html
+          n=$(cat ../deploy/www/*.html | grep -o '?v=[^"]*"' | wc -l)
+          m=$(cat ../deploy/www/*.html | grep -o -F "?v=$TAG\"" | wc -l)
+          [ "$n" -gt 0 ] && [ "$n" -eq "$m" ] || { echo "$m of $n stamps carry $TAG" >&2; exit 1; }
+          grep -q -F "id=\"api-version\">$TAG<" ../deploy/www/index.html
           tar -czf ../dist/deploy.tar.gz -C ../deploy \
             Caddyfile mcdc-tick mc-dualstack-check.service mcdc-tick.service mcdc-tick.timer caddy.service www
           (cd ../dist && sha256sum mc_dualstack_check_linux_* deploy.tar.gz > SHA256SUMS && cat SHA256SUMS)

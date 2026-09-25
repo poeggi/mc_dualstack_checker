@@ -39,6 +39,9 @@ jobs:
             case "$v" in *[\'\"\\\&\|\<\>]*) echo "unexpected character in a config value" >&2; exit 1 ;; esac
           done
           API=${MC_BACKEND%/}
+          if grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html; then
+            echo "local include without a version stamp" >&2; exit 1
+          fi
           sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"$API\"|" \
                  -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
                  -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" \

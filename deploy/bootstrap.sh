@@ -48,9 +48,10 @@ id mcdc  >/dev/null 2>&1 || useradd --system --no-create-home --shell "$nologin"
 id caddy >/dev/null 2>&1 || useradd --system --home-dir /var/lib/caddy --create-home --shell "$nologin" caddy
 
 echo "== deploy files"
+# The pages come with the release the first tick installs, stamped with
+# its version.
 mkdir -p /etc/caddy /var/www/mcdc /var/lib/mcdc
 install -m 644 "$HERE/Caddyfile" /etc/caddy/Caddyfile
-install -m 644 "$HERE/www/"* /var/www/mcdc/
 install -m 755 "$HERE/mcdc-tick" /usr/local/bin/mcdc-tick
 install -m 644 "$HERE/mc-dualstack-check.service" "$HERE/mcdc-tick.service" "$HERE/mcdc-tick.timer" "$HERE/caddy.service" /etc/systemd/system/
 chown -R caddy:caddy /var/lib/caddy

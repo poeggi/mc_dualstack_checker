@@ -46,13 +46,6 @@ put() {
     install -m "$3" "$1" "$2.new" && mv -f "$2.new" "$2"
 }
 
-# stamp_page <page> <version>: writes version into the page's version
-# field and into the ?v= stamps of its includes, when they differ.
-stamp_page() {
-    sed -e "s|\(id=\"api-version\">\)[^<]*|\1$2|" -e "s|?v=[^\"]*\"|?v=$2\"|g" "$1" > "$tmp/page" || return 1
-    cmp -s "$tmp/page" "$1" || put "$tmp/page" "$1" 644
-}
-
 caddy_update() {
     [ "$("$CADDY" version 2>/dev/null | cut -d' ' -f1)" != "v$CADDY_VERSION" ] || return 0
     name="caddy_${CADDY_VERSION}_linux_$ARCH.tar.gz"
@@ -98,16 +91,12 @@ trust_update() {
     echo "trusted proxies: $(sed -n 's/^[[:space:]]*trusted_proxies //p' /etc/caddy/Caddyfile)"
 }
 
-# sync_deploy <dir> <version>: installs the deploy files of a release, its
-# Caddyfile with the trusted host's current addresses and its pages stamped
-# with the version. Caddy reloads when its config changed and restarts when
-# its unit did.
+# sync_deploy <dir>: installs the deploy files of a release, its Caddyfile
+# with the trusted host's current addresses. Caddy reloads when its config
+# changed and restarts when its unit did.
 sync_deploy() {
     d=$1
     trusted_render "$d/Caddyfile"
-    for f in "$d"/www/*.html; do
-        stamp_page "$f" "$2" || return 1
-    done
     "$CADDY" adapt --config "$d/Caddyfile" >/dev/null 2>&1 || { echo "release Caddyfile invalid" >&2; return 1; }
     units=
     for u in $UNITS; do
@@ -154,7 +143,7 @@ release_update() {
         [ "$(wc -l < want)" -eq 2 ] && sha256sum -c --quiet --strict want) || return 1
     mkdir -p "$r/deploy" && tar -xzf "$r/deploy.tar.gz" -C "$r/deploy" || return 1
 
-    sync_deploy "$r/deploy" "$latest" || return 1
+    sync_deploy "$r/deploy" || return 1
     put "$r/$asset" "$BIN" 755 || return 1
     mkdir -p "$STATE"
     echo "$latest" > "$STATE/version"
@@ -163,20 +152,9 @@ release_update() {
     echo "installed $latest"
 }
 
-# The installed pages carry the installed version, also when bootstrap
-# copied them unstamped.
-stamp() {
-    ver=$(cat "$STATE/version" 2>/dev/null) || return 0
-    for f in /var/www/mcdc/*.html; do
-        [ -f "$f" ] || continue
-        stamp_page "$f" "$ver" || return 1
-    done
-}
-
 caddy_update || echo "caddy update failed, keeping the current one" >&2
 release_update || echo "update failed, keeping current version" >&2
 trust_update || echo "trusted proxies update failed, keeping the current ones" >&2
-stamp || true
 
 [ "$BUSY_SECONDS" -gt 0 ] && { timeout "$BUSY_SECONDS" sh -c 'while :; do :; done' || true; }
 exit 0
