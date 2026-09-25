@@ -8,7 +8,7 @@
 //
 // .htaccess maps api/<endpoint> here; the endpoint is the last path segment.
 //   api/config   -> {"backend": "<API URL>" | "", "version": ...}
-//   api/health   -> the API's /health, one copy for all visitors
+//   api/health   -> the API's /health, one copy for all visitors, see health()
 //
 // Also the router for the built-in development server: other paths are
 // served as static files, scripts excepted.
@@ -40,16 +40,13 @@ function fail(int $code, string $msg): never {
 const BACKEND_TIMEOUT = 3;
 
 // backend asks the backend and returns [status, body, retry-after]; status
-// is 0 and body null without a JSON answer. With forward, the backend gets
-// the client address for its per-client limits.
-function backend(string $endpoint, array $params, bool $forward): array {
-    $url = rtrim(MC_BACKEND, '/') . '/' . $endpoint . ($params ? '?' . http_build_query($params) : '');
-    $ch = curl_init($url);
+// is 0 and body null without a JSON answer.
+function backend(string $endpoint): array {
+    $ch = curl_init(rtrim(MC_BACKEND, '/') . '/' . $endpoint);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => BACKEND_TIMEOUT,
         CURLOPT_USERAGENT      => 'mc_dualstack_check/' . MC_VERSION . ' (https://www.poggensee.it/mc_dualstack_check/)',
-        CURLOPT_HTTPHEADER     => $forward ? ['X-Forwarded-For: ' . ($_SERVER['REMOTE_ADDR'] ?? '')] : [],
     ]);
     $retry  = null;
     curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $line) use (&$retry) {
@@ -67,62 +64,91 @@ function backend(string $endpoint, array $params, bool $forward): array {
     return [$status, $raw, $retry];
 }
 
-// respond passes a backend answer on with its status code.
-function respond(int $status, ?string $raw, ?int $retry): never {
-    if ($raw === null) {
-        fail(502, 'upstream unreachable');
-    }
+// finish sends a complete answer and ends the response, so work done after
+// it keeps no client waiting.
+function finish(int $status, string $body, array $headers): void {
+    ignore_user_abort(true);
+    @ini_set('zlib.output_compression', '0');
     http_response_code($status);
-    if ($status === 429 || $status === 503) {
-        header('Retry-After: ' . (int)($retry ?? 10));
+    foreach ($headers as $h) {
+        header($h);
     }
-    echo $raw;
-    exit;
-}
-
-// relay passes one call on to the backend on behalf of the client.
-function relay(string $endpoint, array $params = []): never {
-    if (MC_BACKEND === '') {
-        fail(503, 'no backend configured');
+    header('Content-Length: ' . strlen($body));
+    header('Connection: close');
+    echo $body;
+    while (ob_get_level() > 0) {
+        ob_end_flush();
     }
-    respond(...backend($endpoint, $params, true));
+    flush();
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
 }
 
 // The backend refreshes its health every 7 s; asking more often gains
-// nothing. .htaccess keeps the dot file off the web.
+// nothing. .htaccess keeps the dot files off the web, and the deploy leaves
+// them in place.
 const HEALTH_TTL   = 7;
 const HEALTH_CACHE = __DIR__ . '/.health.json';
+const HEALTH_LOCK  = __DIR__ . '/.health.lock';
 
-// health answers all visitors from one copy of the backend's /health,
-// fetched at most every HEALTH_TTL seconds and as this host, so no
-// visitor's reloads count against the backend's health limit. A fetch
-// without an answer is tried once more, and a failure is kept like an
-// answer, so during an outage at most one visitor per HEALTH_TTL waits.
-// Without a usable cache file it relays directly.
+// health answers at once from this host's copy of the backend's /health,
+// with the copy's age in the Age header, or with 503 while there is no copy
+// yet. Visitors' reloads never reach the backend. A copy older than
+// HEALTH_TTL is refreshed after the answer has gone out, so no visitor waits
+// for the backend.
 function health(): never {
     if (MC_BACKEND === '') {
         fail(503, 'no backend configured');
     }
-    $fh = @fopen(HEALTH_CACHE, 'c+');
-    if ($fh === false || !flock($fh, LOCK_EX)) {
-        relay('health');
+    $kept = json_decode((string)@file_get_contents(HEALTH_CACHE), true);
+    if (!isset($kept['at'], $kept['status'])) {
+        finish(503, json_encode(['error' => 'health not known yet']), ['Retry-After: ' . HEALTH_TTL]);
+        refresh_health();
+        exit;
     }
-    clearstatcache(true, HEALTH_CACHE);
-    $kept = json_decode(stream_get_contents($fh) ?: 'null', true);
-    if (!isset($kept['status']) || time() - filemtime(HEALTH_CACHE) >= HEALTH_TTL) {
-        [$status, $body, $retry] = backend('health', [], false);
-        if ($status === 0) {
-            [$status, $body, $retry] = backend('health', [], false);
+    $age = max(0, time() - (int)$kept['at']);
+    $headers = ['Age: ' . $age];
+    if ($kept['body'] === null) {
+        $status = 502;
+        $body = json_encode(['error' => 'upstream unreachable']);
+    } else {
+        $status = (int)$kept['status'];
+        $body = $kept['body'];
+        if ($status === 429 || $status === 503) {
+            $headers[] = 'Retry-After: ' . (int)($kept['retry'] ?? 10);
         }
-        $kept = ['status' => $status, 'body' => $body, 'retry' => $retry];
-        ftruncate($fh, 0);
-        rewind($fh);
-        fwrite($fh, json_encode($kept));
-        fflush($fh);
     }
-    flock($fh, LOCK_UN);
-    fclose($fh);
-    respond($kept['status'], $kept['body'], $kept['retry']);
+    finish($status, $body, $headers);
+    if ($age >= HEALTH_TTL) {
+        refresh_health();
+    }
+    exit;
+}
+
+// refresh_health asks the backend once more when the first try got no
+// answer, and replaces the copy in one step. Only the request that gets the
+// lock refreshes; a failure is kept like an answer.
+function refresh_health(): void {
+    set_time_limit(4 * BACKEND_TIMEOUT);
+    $lock = @fopen(HEALTH_LOCK, 'c');
+    if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+        return;
+    }
+    $kept = json_decode((string)@file_get_contents(HEALTH_CACHE), true);
+    if (!isset($kept['at']) || time() - (int)$kept['at'] >= HEALTH_TTL) {
+        [$status, $body, $retry] = backend('health');
+        if ($status === 0) {
+            [$status, $body, $retry] = backend('health');
+        }
+        $tmp = HEALTH_CACHE . '.' . getmypid();
+        $copy = json_encode(['at' => time(), 'status' => $status, 'body' => $body, 'retry' => $retry]);
+        if (@file_put_contents($tmp, $copy) !== false) {
+            @rename($tmp, HEALTH_CACHE);
+        }
+    }
+    flock($lock, LOCK_UN);
+    fclose($lock);
 }
 
 switch (basename($path)) {

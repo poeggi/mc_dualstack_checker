@@ -1,4 +1,4 @@
 *.exe
 *.log
 .DS_Store
-frontend/.health.json
+frontend/.health*

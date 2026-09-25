@@ -16,6 +16,11 @@ var REUSE_SECONDS = CACHE_TTL / 2;
 var REUSE_DELAY_MS = 100;
 // Seconds the page keeps the backend's health, per tab and release.
 var HEALTH_SECONDS = 30;
+// The web host's copy of the backend's health counts as current up to
+// HOST_HEALTH_TTL seconds of age. An older copy is refreshed right after it
+// is served, within HOST_REFRESH_MS.
+var HOST_HEALTH_TTL = 7;
+var HOST_REFRESH_MS = 6500;
 // Default ports per edition. The IPv6 port defaults to the IPv4 port;
 // Bedrock servers commonly listen on 19133 for IPv6, so that is the first
 // IPv6 fallback.
@@ -152,9 +157,8 @@ function fillForm(q) {
 }
 
 // -- API ---------------------------------------------------------
-// Probes go straight to the API at apiBase. config and health come from
-// api/<endpoint> on this host, which keeps one copy of the API's health.
-// Errors are thrown as { rateLimited, retry } | { unreachable } |
+// Probes go straight to the API at apiBase; config comes from api/config on
+// this host. Errors are thrown as { rateLimited, retry } | { unreachable } |
 // { message }.
 function api(endpoint, params) {
     var q = new URLSearchParams(params || {}).toString();
@@ -292,15 +296,40 @@ function keep(key, entry) {
 
 // loadHealth answers from the tab's kept health while it is young and
 // from the same release, so reloads do not ask again.
+// hostHealth asks this host for its copy of the backend's health. It
+// resolves to { up, data, current }: up when the web host reached the
+// backend, current when the copy is at most HOST_HEALTH_TTL old.
+function hostHealth() {
+    return fetch("api/health", { cache: "no-store" }).then(function (res) {
+        var age = parseInt(res.headers.get("Age"), 10);
+        return res.json().catch(function () { return {}; }).then(function (body) {
+            return { up: res.ok && !!body.ok, data: body, current: age <= HOST_HEALTH_TTL };
+        });
+    }, function () {
+        return { up: false, data: {}, current: true };
+    });
+}
+
+// currentHealth is the web host's current view of the backend. When its
+// copy is older, or there is none yet, it asks again once the web host has
+// refreshed it.
+function currentHealth() {
+    return hostHealth().then(function (h) {
+        if (h.current) return h;
+        return new Promise(function (resolve) { setTimeout(resolve, HOST_REFRESH_MS); }).then(hostHealth);
+    });
+}
+
 function loadHealth() {
     var now = Math.floor(Date.now() / 1000);
     try {
         var kept = JSON.parse(sessionStorage.getItem("health") || "null");
         if (kept && kept.release === pageVersion && now - kept.at < HEALTH_SECONDS) return Promise.resolve(kept.data);
     } catch (e) {}
-    return api("health").then(function (h) {
-        try { sessionStorage.setItem("health", JSON.stringify({ release: pageVersion, at: now, data: h })); } catch (e) {}
-        return h;
+    return currentHealth().then(function (h) {
+        if (!h.up) throw h;
+        try { sessionStorage.setItem("health", JSON.stringify({ release: pageVersion, at: now, data: h.data })); } catch (e) {}
+        return h.data;
     });
 }
 
@@ -348,10 +377,8 @@ function runCheck(q) {
         setBusy(false);
         if (err && err.unreachable) {
             // The web host's view of the API tells the two cases apart.
-            api("health").then(function () {
-                showNotice("The API is online, but your browser cannot reach it.");
-            }, function () {
-                showNotice("API unavailable.");
+            currentHealth().then(function (h) {
+                showNotice(h.up ? "The API is online, but your browser cannot reach it." : "API unavailable.");
             });
         } else {
             showNotice(err && err.message ? err.message : "Check failed.");

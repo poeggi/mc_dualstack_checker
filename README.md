@@ -36,11 +36,11 @@ The public API is the backend, documented in [docs/api.md](docs/api.md): the end
 The page sends its probes straight to the API. The helper on the web host answers at `api/<endpoint>`:
 
 - `api/config`: `{"backend": "<API URL>" | "", "version": "..."}`, the API the page uses (empty when none is configured) and the release.
-- `api/health`: one copy of the backend's `/health` for all visitors, refreshed at most every 7 s and asked for as the web host. Visitors' reloads do not count against the backend's health limit. Without a usable cache file, each request is passed on.
+- `api/health`: one copy of the backend's `/health` for all visitors, answered at once with its age in the `Age` header. A copy older than 7 s is refreshed after the answer has gone out, by one request only: 3 s per try, one retry when there is no answer. No visitor waits for the backend, and visitors' reloads never reach it.
 
-The helper answers `404` for unknown endpoints, `502` when the API is unreachable and `503` when none is configured. It looks up no server names itself.
+The helper answers `404` for unknown endpoints, `502` when the web host could not reach the API, and `503` when none is configured or no health copy exists yet. It looks up no server names itself. The deploy keeps the health copy.
 
-When a probe cannot reach the API, the page asks `api/health` again. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it." The footer shows the API version, or "API unavailable".
+When a probe cannot reach the API, the page asks `api/health` again. If that copy is older than 7 s, it asks once more after 6.5 s, when the web host has refreshed it. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it." The footer shows the API version, or "API unavailable".
 
 Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state. The page keeps the backend's health for 30 s per tab.
 

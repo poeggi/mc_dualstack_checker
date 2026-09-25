@@ -60,7 +60,7 @@ jobs:
             set ssl:verify-certificate yes; set ftp:ssl-force true;
             set ftp:ssl-protect-data true; set net:timeout 20; set net:max-retries 2;
             set cmd:fail-exit on;
-            mirror -R --delete --verbose $DRY frontend/ ${TARGET:-./};
+            mirror -R --delete --verbose --exclude-glob .health* $DRY frontend/ ${TARGET:-./};
             bye"
 
       - name: verify live
