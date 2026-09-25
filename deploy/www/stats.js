@@ -26,13 +26,21 @@ function el(tag, cls, text) {
 
 function pad(n) { return String(n).padStart(2, "0"); }
 
+// ago names the UTC day of d relative to today.
+function ago(d) {
+    var now = new Date();
+    var n = Math.round((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())) / 86400000);
+    return n === 0 ? "Today" : n === 1 ? "Yesterday" : n + " days ago";
+}
+
 // label names a period by its start.
 function label(kind, start) {
     var d = new Date(start);
     var ymd = d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate());
     var hm = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes());
     if (kind === "minutes") return hm;
-    if (kind === "hours") return ymd + " " + hm;
+    if (kind === "hours") return ago(d) + " " + hm;
     if (kind === "days") return ymd;
     return ymd.slice(0, 7);
 }
@@ -61,7 +69,7 @@ var tip = el("div", "tip");
 tip.hidden = true;
 document.body.appendChild(tip);
 
-function showTip(kind, r, bar) {
+function showTip(kind, r, bar, touch) {
     var total = value(r);
     tip.textContent = "";
     tip.appendChild(el("div", "tip-head", label(kind, r.start)));
@@ -77,10 +85,16 @@ function showTip(kind, r, bar) {
         tip.appendChild(group);
     });
     tip.hidden = false;
-    // Beside the picked bar, level with the chart's top.
-    var b = bar.getBoundingClientRect();
+    // Beside the picked bar, level with the chart's top; on touch screens
+    // above the chart, where the finger does not cover it.
+    var b = bar.getBoundingClientRect(), w = tip.offsetWidth;
+    var right = window.scrollX + document.documentElement.clientWidth - 8;
     var x = window.scrollX + b.right + 10, y = window.scrollY + b.top;
-    if (x + tip.offsetWidth > window.scrollX + document.documentElement.clientWidth - 8) x = window.scrollX + b.left - tip.offsetWidth - 10;
+    if (touch) {
+        x = window.scrollX + b.left + b.width / 2 - w / 2;
+        y -= tip.offsetHeight + 8;
+    }
+    if (x + w > right) x = touch ? right - w : window.scrollX + b.left - w - 10;
     tip.style.left = Math.max(window.scrollX + 8, x) + "px";
     tip.style.top = Math.max(window.scrollY + 8, y) + "px";
 }
@@ -94,25 +108,45 @@ function unpick() {
     picked = null;
 }
 
-// pick shows the non-empty bar nearest to the pointer; empty periods are
+// nearest is the non-empty bar nearest to x, or -1; empty periods are
 // skipped.
-function pick(kind, bars, list, e) {
-    var best = null, dist = Infinity;
+function nearest(bars, list, x) {
+    var best = -1, dist = Infinity;
     Array.prototype.forEach.call(bars.children, function (bar, i) {
         if (!value(list[i])) return;
         var b = bar.getBoundingClientRect();
-        var d = Math.abs(e.clientX - (b.left + b.width / 2));
+        var d = Math.abs(x - (b.left + b.width / 2));
         if (d < dist) { dist = d; best = i; }
     });
-    if (best === null) { unpick(); return; }
-    var bar = bars.children[best];
+    return best;
+}
+
+function pick(kind, bars, list, i, touch) {
+    if (i < 0) { unpick(); return; }
+    var bar = bars.children[i];
     if (bar !== picked) {
         unpick();
         picked = bar;
         bars.classList.add("picking");
         bar.classList.add("picked");
     }
-    showTip(kind, list[best], bar);
+    showTip(kind, list[i], bar, touch);
+}
+
+// A mouse picks by hovering. A finger picks by a tap and follows while it
+// slides sideways; a tap on the picked bar closes it.
+var sliding = false;
+function listen(kind, bars, list) {
+    bars.addEventListener("pointerdown", function (e) {
+        var touch = e.pointerType !== "mouse", i = nearest(bars, list, e.clientX);
+        if (touch && i >= 0 && bars.children[i] === picked) { unpick(); return; }
+        sliding = touch;
+        pick(kind, bars, list, i, touch);
+    });
+    bars.addEventListener("pointermove", function (e) {
+        if (e.pointerType === "mouse" || sliding) pick(kind, bars, list, nearest(bars, list, e.clientX), e.pointerType !== "mouse");
+    });
+    bars.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse") unpick(); });
 }
 
 // scaleTop is the smallest of 1, 2 or 5 times a power of ten that is at
@@ -139,9 +173,7 @@ function chart(kind, rows) {
         });
         bars.appendChild(bar);
     });
-    bars.addEventListener("mousemove", function (e) { pick(kind, bars, list, e); });
-    bars.addEventListener("mouseleave", unpick);
-    bars.addEventListener("click", function (e) { e.stopPropagation(); pick(kind, bars, list, e); });
+    listen(kind, bars, list);
     c.appendChild(bars);
     return c;
 }
@@ -206,7 +238,12 @@ function fill(s, kind, rows) {
     s.appendChild(details);
 }
 
-document.addEventListener("click", unpick);
+// A tap or click outside the charts and scrolling close the box. Taps on
+// plain page areas do not reach a click handler in iOS Safari.
+document.addEventListener("pointerdown", function (e) { if (!e.target.closest(".bars")) unpick(); });
+document.addEventListener("pointerup", function () { sliding = false; });
+document.addEventListener("pointercancel", function () { sliding = false; });
+window.addEventListener("scroll", function () { if (!sliding) unpick(); });
 
 var box = document.getElementById("stats");
 box.textContent = "";
