@@ -36,7 +36,7 @@ json() { curl -s -H "X-Forwarded-For: ${CLIENT:-198.51.100.1}" "$1" | "$PY" -c "
 
 echo "== endpoints"
 check "health"                      json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
-check "usage numbers written at start" "$PY" -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if all(k in d for k in ('minutes','hours','days','months')) else 1)" "$STATS/stats.json"
+check "usage numbers written at start" "$PY" -c "import json,sys; sys.exit(0 if all(isinstance(json.load(open(sys.argv[1] + '/stats/' + k + '.json'))['periods'], list) for k in ('minutes','hours','days','months')) else 1)" "$STATS"
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400

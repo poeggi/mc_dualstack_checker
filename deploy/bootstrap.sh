@@ -34,14 +34,12 @@ fi
 
 echo "== firewall"
 if systemctl is-active -q firewalld 2>/dev/null; then
-    firewall-cmd -q --permanent --add-service=http
     firewall-cmd -q --permanent --add-service=https
     firewall-cmd -q --reload
 elif command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-    ufw allow 80/tcp >/dev/null
     ufw allow 443/tcp >/dev/null
 else
-    echo "no firewalld or ufw active; make sure TCP 80 and 443 are open"
+    echo "no firewalld or ufw active; make sure TCP 443 is open"
 fi
 
 echo "== users"

@@ -83,7 +83,9 @@ if [ -n "$API" ]; then
     check "icon"             is "$API/favicon.svg" 200
     check "stylesheet"       is "$API/style.css" 200
     check "usage page"       is "$API/stats" 200
-    check "usage numbers"    json "$API/stats.json" "all(d[k] and d[k][0].get('current') for k in ('minutes', 'hours', 'days', 'months'))"
+    for k in minutes hours days months; do
+        check "usage numbers: $k" json "$API/stats/$k.json" "isinstance(d['periods'], list)"
+    done
     check "landing page CSP" header "$(curl -s -D - -o /dev/null "$API/")" "^content-security-policy: default-src 'none'"
     check "health: ok, ipv6"            json "$API/health" "d['ok'] and d['ipv6']"
     if [ -n "$HOST" ]; then

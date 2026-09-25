@@ -86,22 +86,19 @@ The backend refreshes this status every 7 seconds. A request returns the last re
 
 ## Usage statistics
 
-`/stats` is a page with charts, `/stats.json` the numbers behind it. The backend writes `stats.json` into its state directory once a minute, and the reverse proxy serves it as a static file, so reading it costs the backend nothing.
+`/stats` is a page with charts. The numbers behind it are in `/stats/minutes.json`, `/stats/hours.json`, `/stats/days.json` and `/stats/months.json`. The backend writes each file when a period of its kind ends, and the reverse proxy serves them as static files, so reading them costs the backend nothing.
 
-Counted are `/ping` requests that pass the limits, and unique clients, each for IPv4 and IPv6 clients. A client is an IPv4 address or the /64 of an IPv6 address. Unique clients are HyperLogLog estimates, within about 2 %; no addresses are stored. Kept are the last 60 minutes, 24 hours, 30 days and 12 months, in UTC.
+Counted are `/ping` requests that pass the limits, and unique clients, each for IPv4 and IPv6 clients. A client is an IPv4 address or the /64 of an IPv6 address. Unique clients are HyperLogLog estimates, within about 2 %; no addresses are stored. Only finished periods are listed: the last 60 minutes, 24 hours, 30 days and 12 months, in UTC, newest first.
 
 ```json
 {
-  "updated": "2026-09-25T12:00:00Z",
-  "minutes": [
-    {"start": "2026-09-25T11:59:00Z", "current": true, "ipv4": {"requests": 7, "clients": 3}, "ipv6": {"requests": 4, "clients": 2}},
+  "updated": "2026-09-25T12:00:01Z",
+  "periods": [
+    {"start": "2026-09-25T11:59:00Z", "ipv4": {"requests": 7, "clients": 3}, "ipv6": {"requests": 4, "clients": 2}},
     {"start": "2026-09-25T11:58:00Z", "ipv4": {"requests": 12, "clients": 5}, "ipv6": {"requests": 0, "clients": 0}}
-  ],
-  "hours": [], "days": [], "months": []
+  ]
 }
 ```
-
-Each list starts with the running period, marked `"current": true`, followed by the finished ones.
 
 ## Caching
 

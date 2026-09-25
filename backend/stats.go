@@ -5,9 +5,11 @@ package main
 // Anonymous usage numbers: probe requests and unique clients per minute,
 // hour, day and month (UTC), each for IPv4 and IPv6 clients. Unique
 // clients are counted with HyperLogLog sketches, which keep no addresses.
-// One worker owns all numbers. Requests hand it a sample without waiting;
-// once a minute it writes stats.json, which Caddy serves as a static file,
-// and its own state, so numbers survive restarts.
+// One worker owns all numbers. Requests hand it a sample without waiting.
+// Only finished periods are published, one file per kind of period under
+// stats/, rewritten when a period of that kind ends; Caddy serves them as
+// static files. The worker's own state is written after new requests, so
+// the numbers survive restarts.
 
 import (
 	"crypto/rand"
@@ -24,11 +26,10 @@ import (
 )
 
 const (
-	statsInterval = time.Minute
-	statsPublic   = "stats.json"
-	statsPrivate  = "stats.state"
-	hllP          = 12 // 4096 registers: 4 KB per sketch, about 1.6 % error
-	hllM          = 1 << hllP
+	statsPublic  = "stats"
+	statsPrivate = "stats.state"
+	hllP         = 12 // 4096 registers: 4 KB per sketch, about 1.6 % error
+	hllM         = 1 << hllP
 )
 
 // sketch is a HyperLogLog register set.
@@ -66,10 +67,9 @@ type counts struct {
 }
 
 type bucket struct {
-	Start   time.Time `json:"start"`
-	Current bool      `json:"current,omitempty"`
-	IPv4    counts    `json:"ipv4"`
-	IPv6    counts    `json:"ipv6"`
+	Start time.Time `json:"start"`
+	IPv4  counts    `json:"ipv4"`
+	IPv6  counts    `json:"ipv6"`
 }
 
 // series is one kind of period: the running bucket with its sketches, and
@@ -82,7 +82,7 @@ type series struct {
 
 type periodKind struct {
 	name  string
-	keep  int // buckets shown, the running one included
+	keep  int // finished buckets published
 	start func(time.Time) time.Time
 	next  func(time.Time) time.Time
 }
@@ -98,10 +98,13 @@ var periodKinds = []periodKind{
 		func(t time.Time) time.Time { return t.AddDate(0, 1, 0) }},
 }
 
-// usage is the worker's state; only the worker touches it.
+// usage is the worker's state; only the worker touches it. rolled names
+// the kinds whose published file is due; dirty is set by new requests.
 type usage struct {
 	Salt   uint64
 	Series map[string]*series
+	rolled map[string]bool
+	dirty  bool
 }
 
 type sample struct {
@@ -123,7 +126,7 @@ func countPing(client string) {
 func newUsage() *usage {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
-	return &usage{Salt: binary.LittleEndian.Uint64(b[:]), Series: map[string]*series{}}
+	return &usage{Salt: binary.LittleEndian.Uint64(b[:]), Series: map[string]*series{}, rolled: map[string]bool{}}
 }
 
 // loadUsage reads the state kept in dir, or starts empty.
@@ -190,11 +193,12 @@ func (u *usage) roll(now time.Time) {
 				s.Done = append([]bucket{{Start: t}}, s.Done...)
 			}
 		}
-		if len(s.Done) > k.keep-1 {
-			s.Done = s.Done[:k.keep-1]
+		if len(s.Done) > k.keep {
+			s.Done = s.Done[:k.keep]
 		}
 		s.Cur = bucket{Start: start}
 		s.Sketch = [2]sketch{newSketch(), newSketch()}
+		u.rolled[k.name] = true
 	}
 }
 
@@ -208,6 +212,7 @@ func (s *series) finished() bucket {
 
 func (u *usage) add(now time.Time, smp sample) {
 	u.roll(now)
+	u.dirty = true
 	h := u.hash(smp.key)
 	for _, k := range periodKinds {
 		s := u.Series[k.name]
@@ -221,17 +226,14 @@ func (u *usage) add(now time.Time, smp sample) {
 	}
 }
 
-// public is the content of stats.json: per kind of period, the running
-// bucket first, then the finished ones.
-func (u *usage) public(now time.Time) []byte {
-	out := map[string]any{"updated": now.UTC().Truncate(time.Second)}
-	for _, k := range periodKinds {
-		s := u.Series[k.name]
-		cur := s.finished()
-		cur.Current = true
-		out[k.name] = append([]bucket{cur}, s.Done...)
-	}
-	b, _ := json.Marshal(out)
+// public is the published file of one kind: its finished periods, newest
+// first.
+func (u *usage) public(kind string, now time.Time) []byte {
+	periods := append([]bucket{}, u.Series[kind].Done...)
+	b, _ := json.Marshal(map[string]any{
+		"updated": now.UTC().Truncate(time.Second),
+		"periods": periods,
+	})
 	return b
 }
 
@@ -260,26 +262,49 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmp.Name(), path)
 }
 
+// publish writes the state when there were new requests, and the file of
+// every kind whose period ended.
 func (u *usage) publish(dir string, now time.Time) {
 	u.roll(now)
 	if dir == "" {
+		clear(u.rolled)
 		return
 	}
-	kept, _ := json.Marshal(u)
-	if err := writeFile(filepath.Join(dir, statsPrivate), kept, 0o600); err != nil {
-		log.Printf("stats: %v", err)
-		return
+	if u.dirty {
+		kept, _ := json.Marshal(u)
+		if err := writeFile(filepath.Join(dir, statsPrivate), kept, 0o600); err != nil {
+			log.Printf("stats: %v", err)
+			return
+		}
+		u.dirty = false
 	}
-	if err := writeFile(filepath.Join(dir, statsPublic), u.public(now), 0o644); err != nil {
-		log.Printf("stats: %v", err)
+	for name := range u.rolled {
+		if err := writeFile(filepath.Join(dir, statsPublic, name+".json"), u.public(name, now), 0o644); err != nil {
+			log.Printf("stats: %v", err)
+			return
+		}
+		delete(u.rolled, name)
 	}
 }
 
-// runStats counts samples and writes the numbers to dir at start, once per
-// statsInterval, and when stop closes; then it closes done.
+// untilNextMinute is the wait until just after the next full minute.
+func untilNextMinute(now time.Time) time.Duration {
+	return now.Truncate(time.Minute).Add(time.Minute + time.Second).Sub(now)
+}
+
+// runStats counts samples and publishes at start, just after every full
+// minute, and when stop closes; then it closes done.
 func runStats(u *usage, dir string, stop <-chan struct{}, done chan<- struct{}) {
+	if dir != "" {
+		if err := os.MkdirAll(filepath.Join(dir, statsPublic), 0o755); err != nil {
+			log.Printf("stats: %v", err)
+		}
+	}
+	for _, k := range periodKinds {
+		u.rolled[k.name] = true
+	}
 	u.publish(dir, time.Now())
-	tick := time.NewTicker(statsInterval)
+	tick := time.NewTimer(untilNextMinute(time.Now()))
 	defer tick.Stop()
 	for {
 		select {
@@ -287,6 +312,7 @@ func runStats(u *usage, dir string, stop <-chan struct{}, done chan<- struct{}) 
 			u.add(time.Now(), smp)
 		case <-tick.C:
 			u.publish(dir, time.Now())
+			tick.Reset(untilNextMinute(time.Now()))
 		case <-stop:
 			u.publish(dir, time.Now())
 			close(done)

@@ -85,7 +85,7 @@ One-time setup on the VM, with git installed:
 git clone https://github.com/poeggi/mc_dualstack_checker && sudo sh mc_dualstack_checker/deploy/bootstrap.sh
 ```
 
-This installs the backend as a systemd service (user `mcdc`, port 8080 on loopback), Caddy for TLS on 443 (Let's Encrypt), and the `mcdc-tick` timer. It installs missing tools with the distribution's package manager and opens TCP 80 and 443 in firewalld or ufw when one is active. A cloud firewall in front of the VM must allow them too.
+This installs the backend as a systemd service (user `mcdc`, port 8080 on loopback), Caddy for TLS on 443 (Let's Encrypt), and the `mcdc-tick` timer. It installs missing tools with the distribution's package manager and opens TCP 443 in firewalld or ufw when one is active. A cloud firewall in front of the VM must allow it too. Only port 443 is needed: Caddy gets and renews its certificate over it.
 
 `mcdc-tick` runs every 7 minutes as root and does four things:
 
@@ -96,7 +96,7 @@ This installs the backend as a systemd service (user `mcdc`, port 8080 on loopba
 
 So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
 
-Caddy serves the API publicly, plus a landing page and the usage page from `deploy/www/`. It serves the backend's `stats.json` from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
+Caddy serves the API publicly, plus a landing page and the usage page from `deploy/www/`. It serves the backend's usage files under `/stats/` from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
 
 The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the VM's deploy files into `deploy.tar.gz`, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
 
