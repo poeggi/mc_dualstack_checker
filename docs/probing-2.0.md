@@ -1,8 +1,9 @@
 # Probing 2.0: research notes
 
-Input for the 2.0 design. Collected 2026-09-26 by web research.
-Claims marked "unverified" come from secondary sources only.
-Nothing here is decided yet.
+Input for the 2.0 design. Collected 2026-09-26 by web research and
+checked against primary sources the same day. Claims marked "unverified"
+rest on secondary sources or single observations. The decisions are in
+[plan-2.0.md](plan-2.0.md).
 
 ## Goal
 
@@ -27,8 +28,8 @@ Bedrock (`backend/bedrock.go`):
 - UDP. RakNet Unconnected Ping (0x01), two tries of 2 s.
 - Unconnected Pong (0x1c) with the string `MCPE;motd;protocol;version;players;max;id;level;mode;modeNum;port4;port6;`.
 - A pong without that string is "invalid data".
-- Frontend port order for IPv6: 19133, then 19132.
-  Reason: BDS cannot bind IPv4 and IPv6 to one port over RakNet.
+- Frontend port order for IPv6: the typed port (default: the IPv4 port, 19132), then 19133, then 19132.
+  Reason for the 19133 fallback: BDS cannot bind IPv4 and IPv6 to one port over RakNet.
 
 Frontend (`frontend/mc_dualstack_check.js`):
 
@@ -38,60 +39,71 @@ Frontend (`frontend/mc_dualstack_check.js`):
 
 ### B1. NetherNet replaces RakNet (highest impact)
 
-- BDS 1.26.50 (2026-09-15) added `transport=nethernet`.
-  Some sources say it is the default: https://minecraft.wiki/w/Bedrock_Edition_Preview_26.50.24
-  Some 1.26.5x servers still answered RakNet pings on 2026-09-26. So the default is not universal. Unverified.
+- The `transport` property exists since BDS 1.26.30 (default `raknet` there).
+- BDS 1.26.50 (2026-09-15) made `nethernet` the default: https://minecraft.wiki/w/Bedrock_Edition_Preview_26.50.24
+  The shipped server.properties of 1.26.50.5, 1.26.51.1 and 1.26.52.3 carry `transport=nethernet`.
+  A 1.26.5x server that still answers RakNet runs with an explicit `transport=raknet`.
+  It works, but logs "TRANSPORT TYPE ERROR ... NetherNet is the only supported transport type": https://mojira.dev/BDS-23108
 - 26.60 (scheduled 2026-10-27) turns the RakNet warning into an error: https://minecraft.wiki/w/Bedrock_Edition_26.60
-  Geyser and WaterdogPE docs say RakNet leaves client and BDS in 26.60. Unverified:
+  WaterdogPE's docs say RakNet leaves client and BDS in 26.60; an unmerged Geyser docs PR says the same.
+  Mojang's own notes say only "RakNet is deprecated". Removal is unverified:
   https://docs.waterdog.dev/waterdogpe-setup/nethernet-configuration
-- In NetherNet mode BDS opens no RakNet socket. A RakNet ping then gets no answer.
-  Status sites already show such servers as offline:
-  https://mojira.dev/BDS-23111 and https://github.com/mcstatus-io/mcutil/issues/15
+- In NetherNet mode BDS opens no UDP socket. A RakNet ping gets no answer.
+  BDS-23111 shows the unanswered pings (LAN discovery). Status sites show such servers as offline:
+  https://github.com/mcstatus-io/mcutil/issues/15
+- Clients since 26.40 probe NetherNet and send RakNet pings at the same time (BDS-23111 captures).
 - NetherNet BDS listens on:
-  - TCP `server-port`, dual-stack (`[::]:19132`),
-  - UDP 7551 (encrypted LAN broadcast only),
+  - TCP `server-port`, dual-stack (`[::]:19132`). With no dual-stack socket available it falls back to IPv4 only (bedrock_server_how_to.html).
+  - UDP 7551 for LAN discovery and ICE negotiation. The packets are encrypted with a fixed, public key.
   - ephemeral UDP ports, or `server-udp-ports`, for WebRTC media.
 
 ### B2. The NetherNet status endpoint
 
-- Mojang doc, updated 2026-09-10:
+- Mojang doc, last commit 2026-09-10:
   https://github.com/Mojang/bedrock-protocol-docs/blob/main/additional_docs/NetherNetOnboardingGuide.md
 - `GET /v1/join` on TCP `server-port`. No auth.
   Answers 2xx and JSON: `name, protocol, version, level, players, maxPlayers, gameType`.
+  Any non-2xx means "no NetherNet".
 - It has no port4/port6 and no server ID.
-- BDS answers plain HTTP. The itzg image health check uses `curl http://127.0.0.1:$PORT/v1/join`:
-  https://github.com/itzg/docker-minecraft-bedrock-server/pull/675
-- Clients try HTTPS first. A server behind a reverse proxy may be HTTPS only.
-  Over plain HTTP or a raw IP, the client asks the user to trust the operator key on first use.
+- BDS answers plain HTTP and TLS on the same port (a health check over plain HTTP passes while
+  a client's TLS handshake runs: https://github.com/itzg/docker-minecraft-bedrock-server/issues/680).
+  mc-monitor in "auto" mode sends `GET http://host:port/v1/join` with a 3 s timeout, then falls back to RakNet:
+  https://github.com/itzg/mc-monitor/pull/172
+- A 1.26.51 client opened with a TLS ClientHello on 19132 and did not fall back to plain HTTP against
+  a server without TLS: https://github.com/Pumpkin-MC/Pumpkin/issues/3738
+  A third-party comment says "HTTPS then HTTP". Mojang's guide states no order. Unverified.
+  Over plain HTTP the client pins the operator key on first use (TOFU prompt).
+- Answers vary: `protocol` comes as a number or a string (mc-monitor accepts both);
+  a relay answered 2xx with an empty text/plain body: https://github.com/GeyserMC/GeyserNetherNet/issues/3
 - A 2xx proves only the TCP signalling path. Game traffic is WebRTC over UDP on other ports.
   "Visible but cannot join" is an open bug: https://mojira.dev/BDS-23108
-  Testing the media path needs an Xbox-signed SDP offer.
-- Geyser supports external signalling hosts (for example `*.wdn.gg`).
+  Testing the media path needs an SDP offer whose `a=identity` carries a GameServerToken JWT;
+  a server may accept offers without one (server policy).
+- Geyser supports external signalling hosts (Warden, `*.wdn.gg`). Its default transport is still RakNet.
   The signalling address can differ from the game host.
 
 ### B3. The IPv4/IPv6 port split
 
-- No open Mojang ticket asks for one shared RakNet port. BDS-752 (2019) was closed as Invalid.
-- server.properties docs: `server-portv6` "is ignored when transport=nethernet and a dual-stack socket will be opened on server-port":
+- server.properties docs: `server-portv6` "is ignored when transport=nethernet and a dual-stack socket will be opened on server-port instead":
   https://minecraft.wiki/w/Server.properties
-- So with NetherNet, IPv6 uses the IPv4 port. The 19133-first order holds for RakNet only.
-- Comments on BDS-23108 say NetherNet over IPv6 rarely works. Unverified.
+- So with NetherNet, IPv6 uses the IPv4 port. The 19133 fallback holds for RakNet only.
+- One BDS-23108 comment reports NetherNet over IPv6 working only once. Single observation.
 
 ### B4. Pong quirks (RakNet)
 
-- BDS-23066 (open, 1.26.30 to 1.26.32 and later): with `enable-lan-visibility=false`, the pong ends after the magic.
+- BDS-23066 (open, 1.26.30.5 to 1.26.32.2): with `enable-lan-visibility=false`, the pong ends after the magic.
   It is 33 bytes, with no string: https://mojira.dev/BDS-23066
   Today we report that as invalid data. It should count as online with no MOTD.
 - gophertunnel and Dragonfly append `0;0;` after port6. Extra fields must be ignored.
 - No format change announced.
 - Cloudburst RakNet (Geyser, WaterdogPE) checks only the magic.
   It answers 0x01 and ignores 0x02. It needs no padding.
-  Its per-IP limiter resets every 10 ms, so two tries are fine.
+  Its per-IP limiter resets every 10 ms; an address over the limit is blocked for 10 s. Two tries 2 s apart are fine.
 
 ### B5. Bedrock formatting codes
 
-- Official list: https://learn.microsoft.com/en-us/minecraft/creator/reference/content/rawmessagejson
-- Hex values: https://minecraft.wiki/w/Formatting_codes (values current since 26.50).
+- Current list and hex values: https://minecraft.wiki/w/Formatting_codes
+  The Microsoft page (learn.microsoft.com, rawmessagejson) dates from 2023 and lacks v and w.
 - m and n are colours in Bedrock. Bedrock has no strikethrough or underline.
 - k, l, o and r work as in Java.
 - A colour code does not reset bold or italic in Bedrock. In Java it does.
@@ -116,8 +128,8 @@ Frontend (`frontend/mc_dualstack_check.js`):
 
 ### B6. Server list and Discovery
 
-- A redesigned Servers tab is rolling out in Bedrock Preview. UI only.
-- No other change to how clients ping third-party servers.
+- A redesigned Servers tab is in the 26.60 previews. UI only, as far as known.
+- No other change to how clients ping third-party servers is known.
 
 ## Java
 
@@ -138,38 +150,41 @@ Frontend (`frontend/mc_dualstack_check.js`):
 
 - Status is still a JSON string. 26.3 is protocol 777, max 32767 characters:
   https://minecraft.wiki/w/Java_Edition_protocol/Packets
-  The 1.20.3 NBT chat change applies to play packets only.
+  The 1.20.3 NBT chat change applies to play packets and the configuration Disconnect; status and login Disconnect stay JSON.
 - Vanilla 1.20.3+ and Adventure emit unstyled parts as plain strings. `extra` elements can be strings.
   We handle that.
 - A translate-only MOTD was seen in the wild (mcstatus issue 319, 2022).
 - Components without text (`object`) exist since 1.21.9.
-- A top-level array is legal: the first element is the parent, the rest its extra. No mainstream server sends one.
+- A top-level array is legal: the first element is the parent, the rest its extra. No mainstream server is known to send one.
 - 26.1-pre2 (2026-03-13): the client cuts MOTD nesting deeper than 16 levels.
   https://minecraft.wiki/w/Text_component_format
 - snake_case events (1.21.5) and `shadow_color` (1.21.4) do not change the visible text.
 
 ### J3. Ping/Pong and proxies
 
-- No server requires the Ping (0x01).
+- No server is known to require the Ping (0x01).
 - BungeeCord's connection throttle (default 3 per 4 s per IP) counts every connection.
-  It lifts only after Ping/Pong, so probes that close early count against it.
+  It lifts only after Ping/Pong, so probes that close early count against it. Off with PROXY protocol.
 - Velocity with ping-passthrough holds the status until its backend pings finish.
 - TCPShield serves a cached MOTD.
 - Vanilla times the RTT from the Ping to the Pong.
+- When the modern status fails, vanilla falls back to the legacy 0xFE ping.
 
 ### J4. Protocol -1
 
 - The convention per the wiki, which warns that some servers may close on an invalid version.
-- Velocity shows its newest version. BungeeCord shows its own. Vanilla ignores the field.
-- mcstatus, minecraft-server-util and mcutil send 47. Velocity then downsamples hex colours.
+- Stock Velocity shows its newest version. BungeeCord shows its own. Vanilla ignores the field.
+  Large networks (2b2t, Pika) echo -1.
+- mcstatus and minecraft-server-util send 47; mcutil sends -1. Velocity drops hex colours for 47.
 - go-mc sends its real version.
 
-### J5. SRV and the client over IPv6
+### J5. SRV and the client
 
-- No change: `_minecraft._tcp`, only without an explicit port. The client sends the SRV target, sometimes with a trailing dot.
+- No change: `_minecraft._tcp`, looked up whenever the port is 25565, typed or default.
+- The login sends the SRV target. The status ping up to 26.3 sends the typed host and port
+  (MC-278651, fixed in 26.4 Snapshot 1, which sends the target plus `_o`).
 - TCPShield shows "Invalid Hostname" when SRV points at its CNAME.
-- No Happy Eyeballs in the client: MC-255735, MC-255720, still open in Jan 2026.
-  The client tries only the first resolved address.
+- No Happy Eyeballs in the client: MC-255735, still open (2026-04-30). The client tries only the first resolved address.
 
 ### J6. Fields and values to tolerate
 
@@ -179,15 +194,9 @@ Frontend (`frontend/mc_dualstack_check.js`):
 - Section-sign codes in `version.name`.
 - `enable-status=false`: vanilla sends no status at all.
 
-## Open questions for the design
+## Not verified
 
-1. Bedrock: RakNet and `/v1/join` in parallel, or one after the other? Which answer wins when both answer?
-2. Bedrock NetherNet over IPv6: which port, and how does that fit the port fallback?
-3. `/v1/join`: HTTP first or HTTPS first? Verify certificates? Send the typed name as Host and SNI?
-4. How to show "signalling works, game path unknown" for NetherNet.
-5. The API field that names the scheme (RakNet, NetherNet, SLP). The cache key may need it.
-6. Java: parse `id@host` and `?props` in the input. Look up only the host.
-7. Java: add Ping/Pong for RTT, with the whole exchange as fallback?
-8. Java: a TCP connect with no status: report "status disabled or ID required"?
-9. Bedrock colours: a separate palette per edition in `mcText`.
-10. Timeline: 26.60 is scheduled for 2026-10-27.
+- Which order the client uses for HTTPS and plain HTTP (B2).
+- Whether a trailing dot appears in the SRV target the client sends.
+- That no pong format change and no other client ping change is coming (B4, B6).
+- Fake protocol numbers from maintenance plugins and colour codes in `version.name` (J6).
