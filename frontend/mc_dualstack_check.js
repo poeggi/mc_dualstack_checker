@@ -522,9 +522,29 @@ function mcText(raw) {
     return frag;
 }
 
-// A server icon is shown only as the PNG data URL the backend passes on.
-function iconURL(info) {
-    return info && info.icon && info.icon.indexOf("data:image/png;base64,") === 0 ? info.icon : "";
+var ICON_PREFIX = "data:image/png;base64,";
+
+// headIcon paints the server icon, the PNG data URL the backend passes on,
+// into a canvas. An image element would load the data URL, which a
+// Content-Security-Policy without data: images blocks; decoding the bytes
+// here loads nothing. Without createImageBitmap, or when the PNG does not
+// decode, there is no icon.
+function headIcon(info) {
+    var icon = info && info.icon;
+    if (!icon || icon.indexOf(ICON_PREFIX) !== 0 || typeof createImageBitmap !== "function") return null;
+    var bytes;
+    try {
+        bytes = Uint8Array.from(atob(icon.slice(ICON_PREFIX.length)), function (c) { return c.charCodeAt(0); });
+    } catch (e) {
+        return null;
+    }
+    var canvas = el("canvas", "head-icon");
+    canvas.width = 64; canvas.height = 64;
+    createImageBitmap(new Blob([bytes], { type: "image/png" })).then(function (bmp) {
+        canvas.getContext("2d").drawImage(bmp, 0, 0, 64, 64);
+        bmp.close();
+    }).catch(function () { canvas.remove(); });
+    return canvas;
 }
 
 function announced(info) {
@@ -540,15 +560,8 @@ function ipCard(r, label) {
     var head = el("div", "ip-card-head text-strong");
     var title = el("span", "head-title");
     title.appendChild(el("span", "", label));
-    var icon = state === "online" ? iconURL(r.info) : "";
-    if (icon) {
-        var img = el("img", "head-icon");
-        img.alt = ""; img.width = 20; img.height = 20;
-        // A Content-Security-Policy without data: images blocks the icon.
-        img.onerror = function () { img.remove(); };
-        img.src = icon;
-        title.appendChild(img);
-    }
+    var icon = state === "online" ? headIcon(r.info) : null;
+    if (icon) title.appendChild(icon);
     head.appendChild(title);
     var badges = el("span", "badge-group");
     if (state === "online" || state === "offline" || state === "unreachable" || state === "no_route") {

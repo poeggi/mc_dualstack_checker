@@ -106,7 +106,7 @@ The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
 Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at the target folder), `MC_BACKEND` (the API URL the page calls; empty disables checks), `LIVE_URL` (optional, the page URL with a trailing slash, verifies the upload).
 
-The page shows server icons as `data:` URLs. A Content-Security-Policy on the web host must allow them: `img-src 'self' data:`.
+The page paints server icons into a canvas. A Content-Security-Policy on the web host needs no `img-src` entry for them.
 
 For the live check, optionally add the secrets `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server that is always up) and `LIVE_JAVA_HOST` (a Java server that is always up). Without them, those checks are skipped.
 
