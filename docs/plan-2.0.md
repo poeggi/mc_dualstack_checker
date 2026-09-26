@@ -52,15 +52,36 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - `info.contact`: the Java `contact` string, when sent.
 - `errors`: on a failed probe, one entry per scheme tried: `{"nethernet": "...", "raknet": "..."}`.
 - `error` and `state` keep their meaning. For Bedrock they follow the RakNet leg, as today.
-- The cache key stays `edition|ip|port`. The cached result carries the scheme.
+- The cache key is `edition|ip|port|host|id`. A proxy routes on the host, and a server with `allowed-connection-ids`
+  hides its status from probes without the ID. A cached answer must never reach a request that sent another name or ID.
+  The cached result carries the scheme.
+- `players_online` and `players_max` are left out when the server sends no player counts (Java without `players`, weak answers).
 
 ### D5. Java (`backend/java.go`)
 
-- Connection ID: `id@host` typed in the page is split there; the API gets `id`. The handshake carries `host?_id=<id>`,
-  percent-encoded. The ID is at most 64 characters. `_o` is not sent: it adds nothing for a status and breaks forced hosts on today's proxies.
-- Ping/Pong after the status: RTT is Pong minus Ping. When the server closes first, RTT is the whole exchange, as today.
-- A TCP connect followed by close or silence, with no status packet: reason "connected, no status (status disabled or connection ID required)".
-- Parser: top-level array (first element is the parent), `translate` (uses `fallback`, else empty), `object` (empty), missing `players`, `contact`.
+Facts from the 26.4 Snapshot 1 code (Mojang ships the jars unobfuscated since 26.1):
+
+- The client splits a typed address at the first `@`: `id@host` gives `_id=id`. A typed `host?k=v` is taken as properties too.
+- Properties are encoded with Java's `URLEncoder` (form encoding) and decoded with `URLDecoder`.
+- The client's status ping sends the same properties as its login, `_id` included. RTT is Pong minus Ping.
+- The server compares `_id` exactly with each entry of `allowed-connection-ids` (split at commas, entries trimmed).
+- A wrong or missing ID, and `enable-status=false`, both close the TCP connection right after the handshake, without a packet.
+- The server reads the host field with a limit of 1024 characters; 26.3 and older read at most 255.
+
+Decisions:
+
+- Connection ID: `id@host` typed in the page is split at the first `@`; the API gets `id`. The handshake carries
+  `host?_id=<id>`, encoded like `URLEncoder`, so it is byte for byte what the client sends.
+- The ID has 1 to 64 printable ASCII characters, without spaces, commas and `@`. An ID with those can never match.
+  `id` with an edition other than Java answers `400`.
+- `_o` is not sent: it adds nothing for a status and breaks forced hosts on today's proxies.
+- Ping/Pong after the status: RTT is Pong minus Ping. The Pong is waited for at most 1 s.
+  When the server closes first or sends something else, RTT is the whole exchange, as today.
+- A close or reset after the TCP connect, before any status byte: reason "connected, no status (status disabled or
+  connection ID required)", or "(status disabled or wrong connection ID)" when an ID was sent. Silence stays "no response (timeout)".
+- Parser: top-level and nested arrays (first element is the parent), `translate` (uses `fallback`, else empty),
+  components without text (`object`, `keybind`), missing `players`, `contact`. Fields of the wrong type are dropped one
+  by one instead of failing the status. Numbers sent as strings are accepted. Formatting codes are stripped from the version name.
 - The handshake keeps sending the SRV target. Up to 26.3 the client's status ping sends the typed host, from 26.4 the target. Documented, not changed.
 - Optional, last: the legacy 0xFE ping when the modern status gets no answer at all.
 
@@ -83,7 +104,9 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - `test/backend.sh`: a fake NetherNet server on loopback (`FILTER_INTERNAL_TARGETS=false` as today); RakNet-only and NetherNet-only cases;
   the `id` parameter; `errors` and `scheme` fields.
 - Run the suite on Windows and in WSL with a sane resolver, as for v1.5.x. Render checks in Edge, WebKit and Firefox.
-- Live: a NetherNet BDS reachable over IPv4 and IPv6, taken from the live-check secrets. No server data in the repo.
+- Local servers, all in scratch, none in the repo: vanilla Java 26.3 and 26.4 Snapshot 1 (plain, with
+  `allowed-connection-ids`, with `status-contact-details`, with `enable-status=false`), and BDS 1.26.5x in WSL with
+  `transport=nethernet` and `transport=raknet`, over IPv4 and IPv6 loopback. No server data in the repo.
 
 ### D8. Documentation
 
@@ -98,13 +121,16 @@ Target: released before Bedrock 26.60 (2026-10-27).
 
 - The `gameType` numbers of `/v1/join` (D2): find a primary source before mapping to names.
 - Plain HTTP on every BDS version with NetherNet, and `/v1/join` over IPv6 on a live BDS.
-- How a 26.4 server refuses a status without the right `_id` (close, silence or an error). Adjust the D5 reason text if needed.
 
 ## Order of work
 
-1. Backend: scheme list and the race, RakNet and SLP as the only schemes. Tests stay green; behaviour unchanged.
-2. Backend: NetherNet probe, weak answers, `scheme` and `errors`. Tests.
-3. Backend: Java ID, Ping/Pong, parser, no-status reason, `contact`. Tests.
-4. Frontend: scheme and contact rows, log lines, `id@host`, Bedrock palette, weak answers. Render checks.
-5. Docs: README, api.md, comments.
-6. Full local test matrix, then the question "ready for 2.0.0?". Release only on a go that names the version.
+All work is local: commits stay on the local main, tests run against local servers. Nothing is pushed before the release go.
+Each step updates README and `docs/api.md` for what it adds.
+
+1. Java backend: ID, Ping/Pong, parser, no-status reason, `contact`, cache key. Tests, local vanilla servers.
+2. Java frontend: `id@host`, rows "Contact" and "Connection ID", missing player counts. Mockups first, commit after approval.
+3. Backend: scheme list and the race, RakNet and SLP as the only schemes, `scheme`. Tests stay green; behaviour otherwise unchanged.
+4. Backend: NetherNet probe, weak answers, `errors`. Tests, local BDS in both transports.
+5. Bedrock frontend: scheme row, log lines, Bedrock palette, weak answers. Mockups first, commit after approval.
+6. Docs pass (README, api.md, comments) and the v2.0.0 release notes.
+7. Full local test matrix, then the question "ready for 2.0.0?". Release only on a go that names the version.

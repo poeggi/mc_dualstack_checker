@@ -142,7 +142,15 @@ Frontend (`frontend/mc_dualstack_check.js`):
 - With SRV the client sends `target?_o=<original>:<port>`.
 - The field maximum grows to 1024.
 - New server property `allowed-connection-ids`, "works both for status and login connections".
-  A probe without the right `_id` gets no status. How it refuses is not documented.
+- Checked in the unobfuscated 26.4 Snapshot 1 jars (`ServerAddress`, `QueryProperties`, `ServerConnectionDetails`,
+  `ServerHandshakePacketListenerImpl`, `DedicatedServer`):
+  - The client splits the typed address at the first `@`, and takes a typed `?k=v` suffix as properties.
+  - Properties use `URLEncoder`/`URLDecoder` (form encoding: a space is `+`).
+  - `_o` is added only when the connected host or port differs from the typed one.
+  - The status ping sends the same properties as the login. RTT is Pong minus Ping.
+  - The server compares `_id` exactly with the trimmed, comma-separated entries.
+  - A missing or wrong ID closes the connection right after the handshake, without a packet.
+    `enable-status=false` does the same.
 - New `status-contact-details`: adds `contact` to the status JSON.
 - New `enable-legacy-status`: can switch off the 0xFE ping.
 
