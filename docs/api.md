@@ -17,8 +17,8 @@ GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java[&id=<id>]
 
 One probe against one address and port. `edition` defaults to `bedrock`. `info.transport` names the transport that answered.
 
-- Java: the Server List Ping over TCP (`tcp`).
-- Bedrock: two transports, raced like Happy Eyeballs. The NetherNet status (`nethernet`) is `GET /v1/join` over TCP, plain HTTP first, then once over TLS when the plain request connected but got no 2xx. The RakNet unconnected ping (`raknet`) is UDP. NetherNet starts first. RakNet starts 250 ms later, or at once when NetherNet failed. NetherNet's status wins: a RakNet status waits for it at most 500 ms. Probes go straight to the server; no relay or Xbox service is involved.
+- Java: the Server List Ping over TCP (`tcp`). The legacy ping (`0xFE`) is not sent. A server that answers only that is `offline`.
+- Bedrock: two transports, raced like Happy Eyeballs. The NetherNet status (`nethernet`) is `GET /v1/join` over TCP, plain HTTP first, then once over TLS when the plain request connected but got no 2xx. The RakNet unconnected ping (`raknet`) is UDP. NetherNet starts first. RakNet starts 250 ms later, or at once when NetherNet failed. NetherNet's status wins: a RakNet status waits for it at most 500 ms. So a RakNet-only server behind a firewall that silently drops TCP answers up to 750 ms later. Probes go straight to the server; no relay or Xbox service is involved.
 - A NetherNet server listens on one TCP port for IPv4 and IPv6. A NetherNet answer shows that the server's signalling answers; the game traffic (WebRTC over UDP) is not tested.
 - A server that answers without its status is `online` with `info` holding only `transport`: a NetherNet 2xx with an empty body, or a RakNet pong without its text. Vanilla servers answer this way when `enable-lan-visibility` is off. Such an answer waits at most 500 ms for a status from the other transport.
 
@@ -28,7 +28,7 @@ With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `
 
 Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. Clients send the target at login. Their status ping sends it from Java 26.4 on; older clients send the typed name there. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails or takes longer than 2 s, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
 
-`id` is a Java connection ID. Java servers from 26.4 on can answer only clients that send one of their `allowed-connection-ids`. Players type it as `<id>@<host>`. The handshake then carries `<host>?_id=<id>`, encoded as the client does it. Name lookups and SRV use the name without the ID. The ID has 1 to 64 printable ASCII characters, no comma and no space at either end: servers split their list at commas and trim the entries. Other IDs, and `id` with another edition, answer `400`.
+`id` is a Java connection ID. Java servers from 26.4 on can answer only clients that send one of their `allowed-connection-ids`. Players type it as `<id>@<host>`. The handshake then carries `<host>?_id=<id>`, encoded as the client does it. Name lookups and SRV use the name without the ID. The ID has 1 to 64 printable ASCII characters, no comma and no space at either end: servers split their list at commas and trim the entries. Other IDs, and `id` with another edition, answer `400`. Servers read the handshake host up to 1024 characters from 26.4 on, older ones up to 255. A longer `<host>?_id=<id>` is refused like a wrong ID. The game hits the same limit.
 
 `host` must be a DNS name of letters, digits, hyphens and underscores, labels of at most 63 characters, 253 in total; a trailing dot is allowed. Otherwise the request answers `400`, or with `ip` the name is ignored.
 
