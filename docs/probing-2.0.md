@@ -86,6 +86,9 @@ Frontend (`frontend/mc_dualstack_check.js`):
   https://github.com/itzg/mc-monitor/pull/172
 - Third-party servers differ: Pumpkin serves plain HTTP only; CloudburstMC (WaterdogPE, Geyser) serves TLS and HTTP
   on one port or rejects TLS; GeyserNetherNet requires an HTTPS keystore.
+- Seen 2026-09-26 on a large public network (CubeCraft, IPv4 only): plain HTTP answers `426`, HTTPS answers `200` with
+  the seven fields plus `dataVersion`, `editor`, `hardcore`, `onlineAuth`, `selfSignedAuth`, `nonce`, `transportLayer`
+  and `connection`. Seven other large networks did not answer on TCP 19132 at all (RakNet only).
 - The client shows `name` as the MOTD of a NetherNet server (Mojang's guide: "to display server details prior to
   connecting"; go-nethernet `status.go`).
 - Answers vary: `protocol` comes as a number or a string (mc-monitor accepts both);

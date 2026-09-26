@@ -1,0 +1,5 @@
+# The Minecraft Server Dualstack Checker API. Its answers are for programs
+# that check a server on a person's request. Nothing here is meant for
+# crawling, indexing or AI training.
+User-agent: *
+Disallow: /

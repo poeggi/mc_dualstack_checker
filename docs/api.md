@@ -1,6 +1,6 @@
 # API
 
-The API is the backend. A live instance runs at `https://mcdscheck-api.poggensee.it`. Use it from your own code; it allows cross-origin requests from any site. Its root is a landing page. It links the web interface, this document and the source.
+The API is the backend. A live instance runs at `https://mcdscheck-api.poggensee.it`. Use it from your own code; it allows cross-origin requests from any site. Its root is a landing page. It links the web interface, this document and the source. Its `robots.txt` asks all crawlers, AI crawlers included, to stay away.
 
 NOTE: The live instance at poggensee.it is free to use for non-commercial users or purposes only.
 
@@ -24,7 +24,7 @@ One probe against one address and port. `edition` defaults to `bedrock`. `info.t
 
 With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) answers `400`; give the IPv4 address instead. Without `ip`, the backend resolves `host` and probes its first public address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
 
-`host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
+`host` is also sent in the Java handshake and as the host of the NetherNet request, since proxies route on it. It is the system name for the limits.
 
 Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. Clients send the target at login. Their status ping sends it from Java 26.4 on; older clients send the typed name there. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails or takes longer than 2 s, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
 
@@ -82,7 +82,7 @@ More `info` fields:
 - `transport`: how the server answered: `nethernet` (Bedrock, TCP), `raknet` (Bedrock, UDP) or `tcp` (Java). Mojang calls these transports.
 - Names follow Mojang: a Java server has a `motd`, a Bedrock server a `server_name` (`server-name`), a `level` (`level-name`) and a `game_mode`.
 - NetherNet sends `game_mode` as a number: it becomes `Survival`, `Creative` or `Adventure`; other numbers stay as sent.
-
+- Text from a server is passed on as valid UTF-8, without control characters other than the line break, without format characters such as bidi overrides, and cut to a length: 256 bytes for `motd`, `server_name` and `contact`, 2048 for the raw forms, 64 for the other fields.
 - `motd_raw`, `server_name_raw`, `level_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
 - `contact`: how to reach the operators, as a Java server sends it (`status-contact-details`, Java 26.4 on).
@@ -106,6 +106,16 @@ States:
 - `unreachable`: `rejected (no route to host)`, `rejected (host unknown)`, `rejected (prohibited)` or `rejected (network unreachable)`.
 - `no_route`: `network unreachable`, `no source address` or `family not supported`.
 - `dns_error`: `timeout` or `error`.
+
+## Changes in 2.0
+
+- Bedrock servers are probed over NetherNet and RakNet. `info.transport` says which answered; failed probes list each transport's error in `errors`.
+- A server that answers without details is `online` with `info` holding only `transport`.
+- Renamed to Mojang's words: `map` is `level`, `map_raw` is `level_raw`, `gamemode` is `game_mode`. Bedrock answers carry `server_name` and `server_name_raw`; `motd` and `motd_raw` are Java only.
+- `players_online` and `players_max` are left out when the server sends no counts.
+- New: `id` (Java connection IDs), `info.contact`, `errors`.
+- Java `rtt_ms` is the time from Ping to Pong, as the client measures it; it was the whole exchange.
+- Results are cached per name and connection ID too.
 
 ## `GET /health`
 
