@@ -15,12 +15,12 @@ GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>][&id=<id>]
 GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java[&id=<id>]
 ```
 
-One probe against one address and port. `edition` defaults to `bedrock`. `info.scheme` names the scheme that answered.
+One probe against one address and port. `edition` defaults to `bedrock`. `info.transport` names the transport that answered.
 
-- Java: the Server List Ping over TCP (`slp`).
-- Bedrock: two schemes, raced like Happy Eyeballs. The NetherNet status (`nethernet`) is `GET /v1/join` over TCP, plain HTTP first, then once over TLS when the plain request connected but got no 2xx. The RakNet unconnected ping (`raknet`) is UDP. NetherNet starts first. RakNet starts 250 ms later, or at once when NetherNet failed. NetherNet's status wins: a RakNet status waits for it at most 500 ms. Probes go straight to the server; no relay or Xbox service is involved.
+- Java: the Server List Ping over TCP (`tcp`).
+- Bedrock: two transports, raced like Happy Eyeballs. The NetherNet status (`nethernet`) is `GET /v1/join` over TCP, plain HTTP first, then once over TLS when the plain request connected but got no 2xx. The RakNet unconnected ping (`raknet`) is UDP. NetherNet starts first. RakNet starts 250 ms later, or at once when NetherNet failed. NetherNet's status wins: a RakNet status waits for it at most 500 ms. Probes go straight to the server; no relay or Xbox service is involved.
 - A NetherNet server listens on one TCP port for IPv4 and IPv6. A NetherNet answer shows that the server's signalling answers; the game traffic (WebRTC over UDP) is not tested.
-- A server that answers without its status is `online` with `info` holding only `scheme`: a NetherNet 2xx with an empty body, or a RakNet pong without its text. Vanilla servers answer this way when `enable-lan-visibility` is off. Such an answer waits at most 500 ms for a status from the other scheme.
+- A server that answers without its status is `online` with `info` holding only `transport`: a NetherNet 2xx with an empty body, or a RakNet pong without its text. Vanilla servers answer this way when `enable-lan-visibility` is off. Such an answer waits at most 500 ms for a status from the other transport.
 
 With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) answers `400`; give the IPv4 address instead. Without `ip`, the backend resolves `host` and probes its first public address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
 
@@ -49,17 +49,17 @@ Names are looked up as absolute names, so the checker host's search domains are 
   "cached": true,
   "age_s": 41,
   "info": {
-    "scheme": "raknet",
+    "transport": "raknet",
     "edition": "MCPE",
-    "motd": "My Bedrock Server",
+    "server_name": "My Bedrock Server",
     "version": "1.21.50",
     "protocol": "766",
     "players_online": 3,
     "players_max": 20,
-    "gamemode": "Survival",
-    "map": "Bedrock level",
+    "game_mode": "Survival",
+    "level": "Bedrock level",
     "server_id": "1234567890123456789",
-    "motd_raw": "\u00a7bMy Bedrock Server",
+    "server_name_raw": "\u00a7bMy Bedrock Server",
     "port4": 19132,
     "port6": 19133
   }
@@ -72,17 +72,18 @@ Names are looked up as absolute names, so the checker host's search domains are 
 | `ip` | the probed address |
 | `rtt_ms` | round trip, `online` only. Java: from Ping to Pong, as the client measures it; the whole exchange when the server does not answer the Ping within 1 s. NetherNet: from the request to the first byte of the answer. RakNet: the whole exchange |
 | `error` | short reason, all states but `online` and `no_dns`, see below |
-| `errors` | when no scheme answered: the `error` of each scheme tried, by scheme name |
+| `errors` | when no transport answered: the `error` of each transport tried, by transport name |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `srv` | `host` and `port` the name's SRV record sent the probe to, see above |
-| `info` | server data; `gamemode` and `map` are Bedrock only, `edition`, `server_id`, `port4` and `port6` RakNet only, `icon` and `contact` Java only; formatting codes are stripped from `motd`, `map` and `version` |
+| `info` | server data; `server_name`, `level` and `game_mode` are Bedrock only, `edition`, `server_id`, `port4` and `port6` RakNet only, `motd`, `icon` and `contact` Java only; formatting codes are stripped from `motd`, `server_name`, `level` and `version` |
 
 More `info` fields:
 
-- `scheme`: how the server answered: `nethernet` (Bedrock, TCP), `raknet` (Bedrock, UDP) or `slp` (Java, TCP).
-- NetherNet fields: `motd` is the server name, `map` the level name, `gamemode` `Survival`, `Creative` or `Adventure` (other numbers as sent).
+- `transport`: how the server answered: `nethernet` (Bedrock, TCP), `raknet` (Bedrock, UDP) or `tcp` (Java). Mojang calls these transports.
+- Names follow Mojang: a Java server has a `motd`, a Bedrock server a `server_name` (`server-name`), a `level` (`level-name`) and a `game_mode`.
+- NetherNet sends `game_mode` as a number: it becomes `Survival`, `Creative` or `Adventure`; other numbers stay as sent.
 
-- `motd_raw`, `map_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
+- `motd_raw`, `server_name_raw`, `level_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
 - `contact`: how to reach the operators, as a Java server sends it (`status-contact-details`, Java 26.4 on).
 - `players_online`, `players_max`: left out when the server sends no counts.

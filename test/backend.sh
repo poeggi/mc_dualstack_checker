@@ -76,7 +76,7 @@ CLIENT=198.51.100.1
 check "health"                    json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
 check "usage numbers written at start" "$PY" -c "import json,sys; sys.exit(0 if all(isinstance(json.load(open(sys.argv[1] + '/stats/' + k + '.json'))['periods'], list) for k in ('minutes','hours','days','months')) else 1)" "$STATS"
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
-check "ping: errors per scheme"     json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['errors'] == {'slp': d['error']}"
+check "ping: errors per transport" json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['errors'] == {'tcp': d['error']}"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400
 check "ping: invalid edition -> 400" is "$B/ping?ip=127.0.0.1&port=1&edition=pocket" 400
@@ -95,11 +95,11 @@ status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null
 check "cache keeps IDs apart"       json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "not d.get('cached')"
 check "same ID is cached"           json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "d.get('cached')"
 
-echo "== bedrock schemes"
+echo "== bedrock transports"
 CLIENT=198.51.100.6
-check "NetherNet wins when both answer" json "$B/ping?ip=127.0.0.1&port=$NN&edition=bedrock" "d['info']['scheme'] == 'nethernet' and d['info']['motd'] == 'Fake NetherNet' and d['info']['gamemode'] == 'Survival'"
-check "RakNet alone answers"        json "$B/ping?ip=127.0.0.1&port=$RK&edition=bedrock" "d['info']['scheme'] == 'raknet' and d['info']['motd'] == 'Fake RakNet'"
-check "errors name both schemes"    json "$B/ping?ip=127.0.0.1&port=9&edition=bedrock" "sorted(d['errors']) == ['nethernet', 'raknet']"
+check "NetherNet wins when both answer" json "$B/ping?ip=127.0.0.1&port=$NN&edition=bedrock" "d['info']['transport'] == 'nethernet' and d['info']['server_name'] == 'Fake NetherNet' and d['info']['game_mode'] == 'Survival'"
+check "RakNet alone answers"        json "$B/ping?ip=127.0.0.1&port=$RK&edition=bedrock" "d['info']['transport'] == 'raknet' and d['info']['server_name'] == 'Fake RakNet' and d['info']['level'] == 'Level'"
+check "errors name both transports"    json "$B/ping?ip=127.0.0.1&port=9&edition=bedrock" "sorted(d['errors']) == ['nethernet', 'raknet']"
 
 echo "== name lookups (localtest.me is public DNS for 127.0.0.1)"
 CLIENT=198.51.100.2

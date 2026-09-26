@@ -42,7 +42,7 @@ func TestPingNetherNet(t *testing.T) {
 	for _, c := range []struct {
 		name, body string
 		status     int
-		want       string // motd|version|protocol|map|players|gamemode, "weak", or the error
+		want       string // server name|version|protocol|level|players|game mode, "weak", or the error
 	}{
 		{"status", joinStatus, 200, "Dedicated Server|1.26.52|2193|Bedrock level|1/10|Creative"},
 		{"protocol as a string", `{"name":"x","protocol":"2216","version":"1.26.60","gameType":7}`, 200, "x|1.26.60|2216||-/-|7"},
@@ -76,8 +76,8 @@ func describeJoin(info *ServerInfo, err error, tg target) string {
 		}
 		return strconv.Itoa(*p)
 	}
-	return strings.Join([]string{info.MOTD, info.Version, info.Protocol, info.Map,
-		show(info.PlayersOnline) + "/" + show(info.PlayersMax), info.Gamemode}, "|")
+	return strings.Join([]string{info.ServerName, info.Version, info.Protocol, info.Level,
+		show(info.PlayersOnline) + "/" + show(info.PlayersMax), info.GameMode}, "|")
 }
 
 // Servers that require HTTPS get the request again over TLS: one answers
@@ -101,7 +101,7 @@ func TestPingNetherNetTLS(t *testing.T) {
 		tg := joinTarget(t, addr)
 		tg.host = "mc.example.net"
 		info, _, err := pingNetherNet(context.Background(), "tcp4", tg)
-		if err != nil || info.MOTD != "Dedicated Server" {
+		if err != nil || info.ServerName != "Dedicated Server" {
 			t.Errorf("%s: %+v %v", name, info, err)
 		}
 	}

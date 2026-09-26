@@ -55,7 +55,7 @@ func TestChatDepth(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		raw = `{"text":"a","extra":[` + raw + `]}`
 	}
-	if got := parseChat(json.RawMessage(raw), 0).visible(); got != strings.Repeat("a", maxChatDepth+1) {
+	if got := string(parseChat(json.RawMessage(raw), 0).visible()); got != strings.Repeat("a", maxChatDepth+1) {
 		t.Errorf("parseChat kept %d levels, want %d", len(got), maxChatDepth+1)
 	}
 }
@@ -81,7 +81,7 @@ func TestLegacyChat(t *testing.T) {
 	} {
 		raw := strings.ReplaceAll(c.raw, s, "\u00a7")
 		want := strings.ReplaceAll(c.want, s, "\u00a7")
-		if got := parseChat(json.RawMessage(raw), 0).legacy(); got != want {
+		if got := string(parseChat(json.RawMessage(raw), 0).legacy()); got != want {
 			t.Errorf("%s: %q, want %q", c.name, got, want)
 		}
 	}
@@ -96,10 +96,10 @@ func TestServerIcon(t *testing.T) {
 		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b.Bytes())
 	}
 	good := encode(64, 64)
-	if got := serverIcon(good); got != good {
+	if got := serverIcon(tainted(good)); got != good {
 		t.Errorf("valid icon dropped")
 	}
-	if got := serverIcon(good[:40] + "\n" + good[40:]); got != good {
+	if got := serverIcon(tainted(good[:40] + "\n" + good[40:])); got != good {
 		t.Errorf("icon with a line break not joined")
 	}
 	for name, s := range map[string]string{
@@ -109,7 +109,7 @@ func TestServerIcon(t *testing.T) {
 		"too large":   good + strings.Repeat("A", iconMax),
 		"no data url": "https://example.com/icon.png",
 	} {
-		if got := serverIcon(s); got != "" {
+		if got := serverIcon(tainted(s)); got != "" {
 			t.Errorf("%s: icon passed on", name)
 		}
 	}
@@ -130,8 +130,8 @@ func TestParsePongPorts(t *testing.T) {
 	if info.Port4 != 19132 || info.Port6 != 19133 {
 		t.Errorf("announced ports %d %d, want 19132 19133", info.Port4, info.Port6)
 	}
-	if info.MOTD != "Hello" || info.MOTDRaw != "\u00a7bHello" || info.MapRaw != "\u00a7aWorld" {
-		t.Errorf("motd %q raw %q map raw %q", info.MOTD, info.MOTDRaw, info.MapRaw)
+	if info.ServerName != "Hello" || info.ServerNameRaw != "\u00a7bHello" || info.LevelRaw != "\u00a7aWorld" {
+		t.Errorf("server name %q raw %q level raw %q", info.ServerName, info.ServerNameRaw, info.LevelRaw)
 	}
 }
 

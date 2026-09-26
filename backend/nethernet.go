@@ -24,7 +24,7 @@ const (
 	netherNetAgent = "libhttpclient/1.0.0.0"
 )
 
-var nethernet = scheme{name: "nethernet", network: "tcp", probe: pingNetherNet}
+var nethernet = transport{name: "nethernet", network: "tcp", probe: pingNetherNet}
 
 // Bedrock game modes by their number in the NetherNet status.
 var netherNetModes = map[int]string{0: "Survival", 1: "Creative", 2: "Adventure"}
@@ -75,6 +75,10 @@ func netherNetJoin(ctx context.Context, network string, t target, secure bool) (
 			},
 			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"http/1.1"}},
 			DisableKeepAlives: true,
+			// A status needs no compression and few headers; a server
+			// gets no more room than the status takes.
+			DisableCompression:     true,
+			MaxResponseHeaderBytes: netherNetMaxBody,
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -107,7 +111,10 @@ func netherNetJoin(ctx context.Context, network string, t target, secure bool) (
 		return nil, 0, a, err
 	}
 	defer res.Body.Close()
-	rtt := first.Sub(sent)
+	var rtt time.Duration
+	if !sent.IsZero() && first.After(sent) {
+		rtt = first.Sub(sent)
+	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
 		return nil, 0, a, probeError(fmt.Sprintf("HTTP %d", res.StatusCode))
 	}
@@ -136,12 +143,12 @@ func parseNetherNetStatus(raw []byte) (*ServerInfo, error) {
 	}
 	name, level := jsonString(st.Name), jsonString(st.Level)
 	info := &ServerInfo{
-		MOTD:     stripFormatting(name),
-		MOTDRaw:  formatted(name),
-		Version:  strings.TrimSpace(jsonString(st.Version)),
-		Protocol: jsonText(st.Protocol),
-		Map:      stripFormatting(level),
-		MapRaw:   formatted(level),
+		ServerName:    name.plain(motdMax),
+		ServerNameRaw: name.coded(rawMax),
+		Version:       jsonString(st.Version).clean(fieldMax),
+		Protocol:      jsonText(st.Protocol).clean(fieldMax),
+		Level:         level.plain(fieldMax),
+		LevelRaw:      level.coded(rawMax),
 	}
 	if n, ok := jsonInt(st.Players); ok {
 		info.PlayersOnline = count(n)
@@ -149,20 +156,20 @@ func parseNetherNetStatus(raw []byte) (*ServerInfo, error) {
 	if n, ok := jsonInt(st.MaxPlayers); ok {
 		info.PlayersMax = count(n)
 	}
-	info.Gamemode = jsonText(st.GameType)
+	info.GameMode = jsonText(st.GameType).clean(fieldMax)
 	if n, ok := jsonInt(st.GameType); ok && netherNetModes[n] != "" {
-		info.Gamemode = netherNetModes[n]
+		info.GameMode = netherNetModes[n]
 	}
-	if info.MOTD == "" && info.Version == "" {
+	if info.ServerName == "" && info.Version == "" {
 		return nil, probeError("not a NetherNet status")
 	}
 	return info, nil
 }
 
 // jsonText is raw as text: a string as it is, a whole number in decimal.
-func jsonText(raw json.RawMessage) string {
+func jsonText(raw json.RawMessage) tainted {
 	if n, ok := jsonInt(raw); ok {
-		return strconv.Itoa(n)
+		return tainted(strconv.Itoa(n))
 	}
-	return strings.TrimSpace(jsonString(raw))
+	return jsonString(raw)
 }

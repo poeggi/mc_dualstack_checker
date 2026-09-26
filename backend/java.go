@@ -31,6 +31,9 @@ const (
 	// Real descriptions nest a few levels; each level parses its subtree
 	// again, so deep nesting would cost depth times size.
 	maxChatDepth = 16
+	// Text built from a description stops growing here; answers keep far
+	// less.
+	chatTextMax = 32 << 10
 	// Largest server icon passed on, as a data URL. Most 64x64 icons need
 	// far less; the limit keeps cached results small.
 	iconMax = 16 << 10
@@ -195,11 +198,11 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 	desc := parseChat(st.Description, 0)
 	info := &ServerInfo{
 		Edition: "Java",
-		Version: stripFormatting(jsonString(version.Name)),
-		MOTD:    stripFormatting(desc.visible()),
-		MOTDRaw: formatted(desc.legacy()),
+		Version: jsonString(version.Name).plain(fieldMax),
+		MOTD:    desc.visible().plain(motdMax),
+		MOTDRaw: desc.legacy().coded(rawMax),
 		Icon:    serverIcon(jsonString(st.Favicon)),
-		Contact: strings.TrimSpace(jsonString(st.Contact)),
+		Contact: jsonString(st.Contact).clean(motdMax),
 	}
 	if n, ok := jsonInt(version.Protocol); ok {
 		info.Protocol = strconv.Itoa(n)
@@ -217,8 +220,8 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 }
 
 // jsonString is raw as a string, "" when it is none.
-func jsonString(raw json.RawMessage) string {
-	var s string
+func jsonString(raw json.RawMessage) tainted {
+	var s tainted
 	_ = json.Unmarshal(raw, &s)
 	return s
 }
@@ -246,7 +249,7 @@ func jsonInt(raw json.RawMessage) (int, bool) {
 // chatComponent is a parsed text component: its own text and style, then
 // its children, which inherit the style.
 type chatComponent struct {
-	text string
+	text tainted
 	// A plain string has no style of its own and keeps the codes in its
 	// text.
 	plain bool
@@ -266,7 +269,7 @@ func parseChat(raw json.RawMessage, depth int) *chatComponent {
 	}
 	switch raw[0] {
 	case '"':
-		var s string
+		var s tainted
 		if json.Unmarshal(raw, &s) != nil {
 			return nil
 		}
@@ -283,9 +286,9 @@ func parseChat(raw json.RawMessage, depth int) *chatComponent {
 		return c
 	case '{':
 		var obj struct {
-			Text          string            `json:"text"`
+			Text          tainted           `json:"text"`
 			Translate     string            `json:"translate"`
-			Fallback      string            `json:"fallback"`
+			Fallback      tainted           `json:"fallback"`
 			Extra         []json.RawMessage `json:"extra"`
 			Color         string            `json:"color"`
 			Bold          *bool             `json:"bold"`
@@ -324,17 +327,17 @@ func parseChildren(list []json.RawMessage, depth int) []*chatComponent {
 }
 
 // visible is the text of c and its children, codes in plain strings kept.
-func (c *chatComponent) visible() string {
+func (c *chatComponent) visible() tainted {
 	var b strings.Builder
 	c.writeVisible(&b)
-	return b.String()
+	return tainted(b.String())
 }
 
 func (c *chatComponent) writeVisible(b *strings.Builder) {
-	if c == nil {
+	if c == nil || b.Len() > chatTextMax {
 		return
 	}
-	b.WriteString(c.text)
+	b.WriteString(string(c.text))
 	for _, e := range c.extra {
 		e.writeVisible(b)
 	}
@@ -345,23 +348,23 @@ func (c *chatComponent) writeVisible(b *strings.Builder) {
 // six digit codes. Every component starts with a reset, so styles never
 // leak into its siblings. A plain string at the top keeps its own codes;
 // below, it takes the style of its parent.
-func (c *chatComponent) legacy() string {
+func (c *chatComponent) legacy() tainted {
 	var b strings.Builder
 	c.writeLegacy(&b, chatStyle{}, true)
-	return b.String()
+	return tainted(b.String())
 }
 
 func (c *chatComponent) writeLegacy(b *strings.Builder, parent chatStyle, top bool) {
-	if c == nil {
+	if c == nil || b.Len() > chatTextMax {
 		return
 	}
 	st := parent.with(c.style)
 	switch {
 	case c.plain && (top || c.text == ""):
-		b.WriteString(c.text)
+		b.WriteString(string(c.text))
 	case c.text != "":
 		b.WriteString(st.codes())
-		b.WriteString(c.text)
+		b.WriteString(string(c.text))
 	}
 	for _, e := range c.extra {
 		e.writeLegacy(b, st, false)
@@ -427,9 +430,11 @@ var pngSignature = []byte("\x89PNG\r\n\x1a\n")
 
 // serverIcon returns the status favicon as a data URL when it is a 64x64
 // PNG within iconMax, else "". Some servers break the base64 into lines.
-func serverIcon(s string) string {
+// Text that decodes as base64 holds only its alphabet, so what passes is
+// clean.
+func serverIcon(t tainted) string {
 	const prefix = "data:image/png;base64,"
-	s = strings.NewReplacer("\n", "", "\r", "").Replace(s)
+	s := strings.NewReplacer("\n", "", "\r", "").Replace(string(t))
 	if len(s) > iconMax || !strings.HasPrefix(s, prefix) {
 		return ""
 	}

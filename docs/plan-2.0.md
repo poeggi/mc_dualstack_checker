@@ -8,21 +8,21 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - The user types host and port as today. No new controls.
 - Bedrock is probed over NetherNet and RakNet. NetherNet is preferred.
 - Java accepts a connection ID, tolerates the 26.4 additions and measures RTT like the client.
-- The card's More section names the scheme that answered. The log shows every scheme tried.
-- The API stays backward compatible. Additions only.
+- The card's More section names the transport that answered. The log shows every transport tried.
+- The API grows by additions. Field names follow Mojang's words, which renames a few (D4, breaking, decided 2026-09-26).
 - Every probe goes straight from the backend to the typed address. No relay, no third-party service.
-- The backend keeps its table-driven shape: probes are pure functions, schemes are data.
+- The backend keeps its table-driven shape: probes are pure functions, transports are data.
 
 ## Decisions
 
-### D1. Schemes and the race
+### D1. Transports and the race
 
-- An edition has an ordered list of schemes. Bedrock: `nethernet` (TCP), `raknet` (UDP). Java: `slp` (TCP).
-- One probe of `ip:port` runs the edition's schemes as a race with a head start, like Happy Eyeballs:
-  - The first scheme starts at once.
+- An edition has an ordered list of transports. Bedrock: `nethernet` (TCP), `raknet` (UDP). Java: `tcp`. Mojang calls these transports (`transport=raknet|nethernet`).
+- One probe of `ip:port` runs the edition's transports as a race with a head start, like Happy Eyeballs:
+  - The first transport starts at once.
   - The next starts 250 ms later, or as soon as the one before it has failed.
-  - A complete answer from the preferred scheme wins, even if a later scheme answered first.
-  - When a later scheme answers while the preferred one is still pending, the result waits for the preferred one at most 500 ms.
+  - A complete answer from the preferred transport wins, even if a later transport answered first.
+  - When a later transport answers while the preferred one is still pending, the result waits for the preferred one at most 500 ms.
   - A weak answer (D3) loses to any complete one and waits for one at most 500 ms. Alone, it still means online.
 - Cost for a RakNet-only server: at most 250 ms. Cost on total failure: unchanged, at most 4 s.
 - The probe budget (`pingTimeout`, 6 s), the in-flight slots and the limits do not change.
@@ -38,9 +38,9 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - Connect and answer within 3 s per attempt (`javaIOTimeout` applies to both TCP editions).
 - Accepted: status 2xx, body at most 16 KiB, a JSON object with `version` or `name`. `protocol` may be a number or a string.
 - No redirects. No 2xx over either attempt means "no NetherNet", as it does for the client.
-- Field mapping: `name` -> motd, `protocol` -> protocol, `version` -> version, `level` -> map, `players` -> players_online,
-  `maxPlayers` -> players_max, `gameType` -> gamemode (0 Survival, 1 Creative, 2 Adventure; other numbers as sent).
-  `edition` stays empty; the scheme names the transport.
+- Field mapping: `name` -> server_name, `protocol` -> protocol, `version` -> version, `level` -> level, `players` -> players_online,
+  `maxPlayers` -> players_max, `gameType` -> game_mode (0 Survival, 1 Creative, 2 Adventure; other numbers as sent).
+  `edition` stays empty; the transport names the transport.
 - The result says that signalling answered and that the game path (WebRTC over UDP) is not tested.
 
 ### D3. Weak answers
@@ -48,20 +48,22 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - A RakNet pong with the magic but no string (BDS-23066, 33 bytes) and a NetherNet 2xx with an empty body are weak answers.
   A 2xx with another body that is no status (a web page) is invalid data, not a weak answer.
   Vanilla BDS sends both when `enable-lan-visibility=false` (measured on 1.26.50.5 to 1.26.60.28).
-- A weak answer alone gives `state: online` with `info` holding only `scheme`. The page says the server answered
+- A weak answer alone gives `state: online` with `info` holding only `transport`. The page says the server answered
   but hides its details, and names the likely cause (`enable-lan-visibility=false`). Wording is settled with the mockups.
 
 ### D4. API additions (`docs/api.md`)
 
 - Request: `id` (Java connection ID, optional). Sent as `host?_id=<id>` in the handshake. DNS and SRV use the bare host.
-- `info.scheme`: `raknet`, `nethernet` or `slp`. Present on every online answer.
+- `info.transport`: `nethernet`, `raknet` or `tcp`. Present on every online answer.
 - `info.contact`: the Java `contact` string, when sent.
-- `errors`: on a failed probe, one entry per scheme tried: `{"nethernet": "...", "raknet": "..."}`.
+- `errors`: on a failed probe, one entry per transport tried: `{"nethernet": "...", "raknet": "..."}`.
 - `error` and `state` keep their meaning. For Bedrock they follow the RakNet leg, as today.
 - The cache key is `edition|ip|port|host|id`. A proxy routes on the host, and a server with `allowed-connection-ids`
   hides its status from probes without the ID. A cached answer must never reach a request that sent another name or ID.
-  The cached result carries the scheme.
+  The cached result carries the transport.
 - `players_online` and `players_max` are left out when the server sends no player counts (Java without `players`, weak answers).
+- Renamed to Mojang's words: `map` -> `level`, `map_raw` -> `level_raw`, `gamemode` -> `game_mode`. Bedrock answers carry
+  `server_name` and `server_name_raw` in place of `motd` and `motd_raw`; Java keeps `motd`. Breaking; the release notes say so.
 
 ### D5. Java (`backend/java.go`)
 
@@ -93,24 +95,28 @@ Decisions:
 
 ### D6. Frontend (`frontend/mc_dualstack_check.js`, `.css`)
 
-- More section: row "Scheme" with `RakNet (UDP)`, `NetherNet (TCP signalling, game path not tested)` or `Server List Ping`.
-  Row "Contact" for Java when present. Row "Connection ID" when one was typed.
-- Weak answers show the D3 text in place of the MOTD.
+- More section, Bedrock only: row "Transport" with `NetherNet (TCP)` (tooltip: signalling only, the game traffic is not tested)
+  or `RakNet (UDP)`. Java has one transport and shows no row.
+  Row "Contact" for Java when present. The connection ID is input, not server data: it shows in the address field
+  and the log, not in the card.
+- Weak answers show "Details: No info provided", with a tooltip naming LAN visibility as the likely cause.
 - Port fallbacks stay as they are. 19133 serves RakNet servers with split ports; NetherNet uses one port for both families.
-- Log: one line per scheme tried, with its error. Existing lines keep their wording.
+- Log: one line per transport tried, with its error. Existing lines keep their wording.
 - Input: `id@host` for Java. The host part goes through the existing validation; the ID part is limited to 64 characters.
 - `mcText` gets a Bedrock palette: 0-9 and a-f with 9 = #447FFF, g-w material colours, m and n as colours,
   no reset on a colour code, no `x` hex sequence. The edition of the check selects the palette.
+- Labels follow Mojang where it has a word: "Server Name" on Bedrock cards (MOTD on Java), "Level", "Game Mode",
+  "Transport". "Hostname | IP address" and "Latency" stay: they say more than Mojang's "Server Address" and "Ping".
 - The collapsed card keeps its height. Everything new lives under More or in the log.
 
 ### D7. Tests
 
-- `backend/ping_test.go`: the race with fake schemes (preferred slow, preferred failing fast, both answering, weak plus complete);
+- `backend/ping_test.go`: the race with fake transports (preferred slow, preferred failing fast, both answering, weak plus complete);
   `/v1/join` parsing (number and string protocol, empty body, HTML body, oversize body); plain-then-TLS retry against a TLS-only
   test server, one that closes on plain HTTP and one that answers it with 400;
   `_id` encoding; Ping/Pong and early close; array and `translate` MOTDs.
 - `test/backend.sh`: a fake NetherNet server on loopback (`FILTER_INTERNAL_TARGETS=false` as today); RakNet-only and NetherNet-only cases;
-  the `id` parameter; `errors` and `scheme` fields.
+  the `id` parameter; `errors` and `transport` fields.
 - Run the suite on Windows and in WSL with a sane resolver, as for v1.5.x. Render checks in Edge, WebKit and Firefox.
 - Local servers, all in scratch, none in the repo: vanilla Java 26.3 and 26.4 Snapshot 1 (plain, with
   `allowed-connection-ids`, with `status-contact-details`, with `enable-status=false`), and BDS 1.26.50.5 to 1.26.60
@@ -119,11 +125,12 @@ Decisions:
 
 ### D8. Documentation
 
-- `README.md`: the two Bedrock schemes and the race, the IPv6 port note for NetherNet (one port, dual-stack), the "game path not tested" caveat,
+- `README.md`: the two Bedrock transports and the race, the IPv6 port note for NetherNet (one port, dual-stack), the "game path not tested" caveat,
   servers with LAN visibility off showing no details, Java connection IDs, the Bedrock palette.
-- `docs/api.md`: `id`, `info.scheme`, `info.contact`, `errors`, weak answers, timeouts of the race, the SRV qualifier (D5).
+- `docs/api.md`: `id`, `info.transport`, `info.contact`, `errors`, weak answers, timeouts of the race, the SRV qualifier (D5).
 - Code comments carry the why: head start and grace, plain HTTP then TLS, no `_o`, weak answers.
-- Release notes for v2.0.0 list the additions and the behaviour changes (parallel schemes, weak pong counts as online).
+- Release notes for v2.0.0 list the additions, the behaviour changes (parallel transports, weak pong counts as online,
+  Java RTT from Ping to Pong) and the breaking renames of D4.
 - `docs/probing-2.0.md` stays as research notes; this file records the decisions. Both are updated when a fact changes.
 
 ## Known limits
@@ -141,9 +148,9 @@ Tests run against local servers. Nothing is pushed before the release go.
 Each step updates README and `docs/api.md` for what it adds.
 
 1. Java backend: ID, Ping/Pong, parser, no-status reason, `contact`, cache key. Tests, local vanilla servers.
-2. Java frontend: `id@host`, rows "Contact" and "Connection ID", missing player counts. Mockups first, commit after approval.
-3. Backend: scheme list and the race, RakNet and SLP as the only schemes, `scheme`. Tests stay green; behaviour otherwise unchanged.
+2. Java frontend: `id@host`, row "Contact", missing player counts ("not provided"). Mockups first, commit after approval.
+3. Backend: transport list and the race, RakNet and TCP as the only transports, `transport`. Tests stay green; behaviour otherwise unchanged.
 4. Backend: NetherNet probe, weak answers, `errors`. Tests, local BDS in both transports.
-5. Bedrock frontend: scheme row, log lines, Bedrock palette, weak answers. Mockups first, commit after approval.
+5. Bedrock frontend: transport row, log lines, Bedrock palette, weak answers. Mockups first, commit after approval.
 6. Docs pass (README, api.md, comments) and the v2.0.0 release notes.
 7. Full local test matrix, then the question "ready for 2.0.0?". Release only on a go that names the version.

@@ -92,32 +92,32 @@ func parsePong(b []byte) (*ServerInfo, error) {
 	}
 	payload := string(b[hdr : hdr+slen])
 
-	// MCPE;MOTD;protocol;version;players;max;serverid;level;gamemode;gamemodeNum;port4;port6;
+	// MCPE;server name;protocol;version;players;max;serverid;level;game mode;game mode number;port4;port6;
 	f := strings.Split(payload, ";")
-	get := func(i int) string {
+	get := func(i int) tainted {
 		if i < len(f) {
-			return strings.TrimSpace(f[i])
+			return tainted(f[i])
 		}
 		return ""
 	}
 	info := &ServerInfo{
-		Edition:  get(0),
-		MOTD:     stripFormatting(get(1)),
-		MOTDRaw:  formatted(get(1)),
-		Protocol: get(2),
-		Version:  get(3),
-		ServerID: get(6),
-		Map:      stripFormatting(get(7)),
-		MapRaw:   formatted(get(7)),
-		Gamemode: get(8),
+		Edition:       get(0).clean(fieldMax),
+		ServerName:    get(1).plain(motdMax),
+		ServerNameRaw: get(1).coded(rawMax),
+		Protocol:      get(2).clean(fieldMax),
+		Version:       get(3).clean(fieldMax),
+		ServerID:      get(6).clean(fieldMax),
+		Level:         get(7).plain(fieldMax),
+		LevelRaw:      get(7).coded(rawMax),
+		GameMode:      get(8).clean(fieldMax),
 	}
-	online, _ := strconv.Atoi(get(4))
-	slots, _ := strconv.Atoi(get(5))
+	online, _ := strconv.Atoi(get(4).clean(fieldMax))
+	slots, _ := strconv.Atoi(get(5).clean(fieldMax))
 	info.PlayersOnline, info.PlayersMax = count(online), count(slots)
 	// The ports the server is configured for, as it announces them for LAN
 	// discovery. Behind port forwarding they differ from the probed port.
-	info.Port4 = announcedPort(get(10))
-	info.Port6 = announcedPort(get(11))
+	info.Port4 = announcedPort(get(10).clean(fieldMax))
+	info.Port6 = announcedPort(get(11).clean(fieldMax))
 	if info.Edition == "" {
 		return nil, probeError("empty pong payload")
 	}
