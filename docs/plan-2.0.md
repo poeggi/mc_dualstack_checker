@@ -30,11 +30,14 @@ Target: released before Bedrock 26.60 (2026-10-27).
 ### D2. The NetherNet probe (`backend/nethernet.go`)
 
 - TCP connect to `ip:port`, then `GET /v1/join` over plain HTTP. `Host` is the typed name, or the IP.
-- When the answer is no HTTP (TLS alert, reset, close), the same request is sent over TLS without certificate
-  checks, SNI set to the typed name. Status pages read public data; the certificate proves nothing we need.
-- Connect and answer within 3 s (`javaIOTimeout` applies to both TCP editions).
+  `User-Agent` is the client's, `libhttpclient/1.0.0.0`.
+- Vanilla BDS has no TLS and answers plain HTTP, so plain HTTP comes first. When that attempt connected but brought
+  no 2xx (a TLS alert, a close, a reset, or an HTTP error from an HTTPS-only server), the same request is sent once
+  over TLS: no certificate checks, ALPN `http/1.1`, SNI the typed name. That serves third-party servers that
+  require HTTPS (GeyserNetherNet). Status pages read public data; the certificate proves nothing we need.
+- Connect and answer within 3 s per attempt (`javaIOTimeout` applies to both TCP editions).
 - Accepted: status 2xx, body at most 16 KiB, a JSON object with `version` or `name`. `protocol` may be a number or a string.
-- No redirects. Any non-2xx means "no NetherNet", as it does for the client.
+- No redirects. No 2xx over either attempt means "no NetherNet", as it does for the client.
 - Field mapping: `name` -> motd, `protocol` -> protocol, `version` -> version, `level` -> map, `players` -> players_online,
   `maxPlayers` -> players_max, `gameType` -> gamemode (0 Survival, 1 Creative, 2 Adventure; other numbers as sent).
   `edition` stays empty; the scheme names the transport.
@@ -44,7 +47,8 @@ Target: released before Bedrock 26.60 (2026-10-27).
 
 - A RakNet pong with the magic but no string (BDS-23066, 33 bytes) and a NetherNet 2xx without JSON are weak answers.
   Vanilla BDS sends both when `enable-lan-visibility=false` (measured on 1.26.50.5 to 1.26.60.28).
-- A weak answer alone gives `state: online` with `info` holding only `scheme`. The page shows "answered without status".
+- A weak answer alone gives `state: online` with `info` holding only `scheme`. The page says the server answered
+  but hides its details, and names the likely cause (`enable-lan-visibility=false`). Wording is settled with the mockups.
 
 ### D4. API additions (`docs/api.md`)
 
@@ -90,7 +94,8 @@ Decisions:
 
 - More section: row "Scheme" with `RakNet (UDP)`, `NetherNet (TCP signalling, game path not tested)` or `Server List Ping`.
   Row "Contact" for Java when present. Row "Connection ID" when one was typed.
-- Weak answers show "answered without status" in place of the MOTD.
+- Weak answers show the D3 text in place of the MOTD.
+- Port fallbacks stay as they are. 19133 serves RakNet servers with split ports; NetherNet uses one port for both families.
 - Log: one line per scheme tried, with its error. Existing lines keep their wording.
 - Input: `id@host` for Java. The host part goes through the existing validation; the ID part is limited to 64 characters.
 - `mcText` gets a Bedrock palette: 0-9 and a-f with 9 = #447FFF, g-w material colours, m and n as colours,
@@ -100,27 +105,33 @@ Decisions:
 ### D7. Tests
 
 - `backend/ping_test.go`: the race with fake schemes (preferred slow, preferred failing fast, both answering, weak plus complete);
-  `/v1/join` parsing (number and string protocol, empty body, HTML body, oversize body); plain-then-TLS retry against a TLS test server;
+  `/v1/join` parsing (number and string protocol, empty body, HTML body, oversize body); plain-then-TLS retry against a TLS-only
+  test server, one that closes on plain HTTP and one that answers it with 400;
   `_id` encoding; Ping/Pong and early close; array and `translate` MOTDs.
 - `test/backend.sh`: a fake NetherNet server on loopback (`FILTER_INTERNAL_TARGETS=false` as today); RakNet-only and NetherNet-only cases;
   the `id` parameter; `errors` and `scheme` fields.
 - Run the suite on Windows and in WSL with a sane resolver, as for v1.5.x. Render checks in Edge, WebKit and Firefox.
 - Local servers, all in scratch, none in the repo: vanilla Java 26.3 and 26.4 Snapshot 1 (plain, with
-  `allowed-connection-ids`, with `status-contact-details`, with `enable-status=false`), and BDS 1.26.5x in WSL with
-  `transport=nethernet` and `transport=raknet`, over IPv4 and IPv6 loopback. No server data in the repo.
+  `allowed-connection-ids`, with `status-contact-details`, with `enable-status=false`), and BDS 1.26.50.5 to 1.26.60
+  in WSL with `transport=nethernet` and `transport=raknet`, LAN visibility on and off, over IPv4 and IPv6 loopback.
+  No server data in the repo.
 
 ### D8. Documentation
 
 - `README.md`: the two Bedrock schemes and the race, the IPv6 port note for NetherNet (one port, dual-stack), the "game path not tested" caveat,
-  Java connection IDs, the Bedrock palette.
+  servers with LAN visibility off showing no details, Java connection IDs, the Bedrock palette.
 - `docs/api.md`: `id`, `info.scheme`, `info.contact`, `errors`, weak answers, timeouts of the race, the SRV qualifier (D5).
 - Code comments carry the why: head start and grace, plain HTTP then TLS, no `_o`, weak answers.
 - Release notes for v2.0.0 list the additions and the behaviour changes (parallel schemes, weak pong counts as online).
 - `docs/probing-2.0.md` stays as research notes; this file records the decisions. Both are updated when a fact changes.
 
-## Open facts to settle while implementing
+## Known limits
 
-- Plain HTTP on every BDS version with NetherNet, and `/v1/join` over IPv6 on a live BDS.
+Nothing open blocks the work. What stays unverified:
+
+- The client's TLS-then-HTTP order and its User-Agent come from third-party code, not from first-party code.
+- The game path (WebRTC over UDP) is not probed; a NetherNet answer proves the signalling only.
+- Java 26.4 is a snapshot. Recheck the ID format at its first pre-release.
 
 ## Order of work
 
