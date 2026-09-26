@@ -516,13 +516,31 @@ function readable(hex) {
     return "rgb(" + c.join(",") + ")";
 }
 
+// Scrambled text (code k) shows random characters in place of its own and
+// swaps them every 50 ms, as the game does every frame. The page font is
+// monospaced, so the width stays. With reduced motion they stay put.
+// Screen readers skip scrambled text.
+var SCRAMBLE_CHARS = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+var scrambleTimer = null;
+
+function scrambled(text) {
+    return Array.from(text, function (ch) {
+        return /\s/.test(ch) ? ch : SCRAMBLE_CHARS.charAt(Math.floor(Math.random() * SCRAMBLE_CHARS.length));
+    }).join("");
+}
+function scrambleAll() {
+    var spans = document.querySelectorAll(".mc-k");
+    if (!spans.length) { clearInterval(scrambleTimer); scrambleTimer = null; }
+    spans.forEach(function (s) { s.textContent = scrambled(s.dataset.text); });
+}
+
 // mcText renders text with legacy colour codes, a section sign plus one
 // character, as styled spans, as the game of the edition does. In Java a
 // colour resets the formatting, and a hex colour is x followed by six codes
 // of one digit each. Bedrock keeps bold and italic across colours and has
-// more colours, no hex.
+// more colours, no hex. Line breaks and runs of spaces show as sent.
 function mcText(raw, bedrock) {
-    var frag = document.createDocumentFragment();
+    var out = el("span", "mc-text");
     var style = {}, text = "";
     var flush = function () {
         if (!text) return;
@@ -532,7 +550,14 @@ function mcText(raw, bedrock) {
         if (style.o) s.style.fontStyle = "italic";
         var deco = [style.n ? "underline" : "", style.m ? "line-through" : ""].join(" ").trim();
         if (deco) s.style.textDecoration = deco;
-        frag.appendChild(s);
+        if (style.k) {
+            s.className = "mc-k";
+            s.dataset.text = text;
+            s.textContent = scrambled(text);
+            s.setAttribute("aria-hidden", "true");
+            if (!scrambleTimer && !matchMedia("(prefers-reduced-motion: reduce)").matches) scrambleTimer = setInterval(scrambleAll, 50);
+        }
+        out.appendChild(s);
         text = "";
     };
     for (var i = 0; i < raw.length; i++) {
@@ -550,7 +575,7 @@ function mcText(raw, bedrock) {
         else if ((bedrock ? "lok" : "lonmk").indexOf(code) >= 0) style[code] = true;
     }
     flush();
-    return frag;
+    return out;
 }
 
 var ICON_PREFIX = "data:image/png;base64,";
@@ -646,13 +671,13 @@ function ipCard(r, label) {
         } else {
             rows.appendChild(players(info) ? row("Players", players(info)) : row("Players", "not provided", true));
         }
-        if (info.server_name) rows.appendChild(row("Server Name", info.server_name_raw ? mcText(info.server_name_raw, true) : info.server_name));
-        if (info.motd) rows.appendChild(row("MOTD", info.motd_raw ? mcText(info.motd_raw, false) : info.motd));
+        if (info.server_name) rows.appendChild(row("Server Name", mcText(info.server_name_raw || info.server_name, true)));
+        if (info.motd) rows.appendChild(row("MOTD", mcText(info.motd_raw || info.motd, false)));
         if (info.version) rows.appendChild(row("Version", info.version));
 
         var extra = [
             ["Transport", TRANSPORTS[info.transport], info.transport === "nethernet" ? NETHERNET_HINT : ""],
-            ["Level", info.level && (info.level_raw ? mcText(info.level_raw, true) : info.level)], ["Game Mode", info.game_mode],
+            ["Level", info.level && mcText(info.level_raw || info.level, true)], ["Game Mode", info.game_mode],
             ["Protocol", info.protocol === "-1" ? "-1 (any)" : info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
             ["Server ID", info.server_id], ["Online", info.player_sample && info.player_sample.join(", ")],
             ["Secure Chat", info.enforces_secure_chat === undefined ? "" : info.enforces_secure_chat ? "enforced" : "not enforced"],
