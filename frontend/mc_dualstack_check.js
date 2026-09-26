@@ -95,11 +95,15 @@ function updateTimeAgo() {
 setInterval(updateTimeAgo, 1000);
 
 // -- Form helpers ------------------------------------------------
-function updatePort4Placeholder() {
-    if (!port4El.value.trim()) port4El.placeholder = String(EDITIONS[editionEl.value].v4);
+// updatePlaceholders shows the edition's default port and address form.
+function updatePlaceholders() {
+    var ed = EDITIONS[editionEl.value];
+    hostEl.placeholder = "e.g. " + (ed.ids ? "[$id@]example.com" : "mc.example.com");
+    if (!port4El.value.trim()) port4El.placeholder = String(ed.v4);
+    port6El.placeholder = port4El.value.trim() || "as IPv4";
 }
-editionEl.addEventListener("change", updatePort4Placeholder);
-port4El.addEventListener("input", function () { port6El.placeholder = port4El.value.trim() || "as IPv4"; });
+editionEl.addEventListener("change", updatePlaceholders);
+port4El.addEventListener("input", updatePlaceholders);
 
 function validPort(val) {
     if (val === "") return true;
@@ -113,6 +117,7 @@ port4El.addEventListener("blur", function () { validatePortField(port4El); });
 port6El.addEventListener("blur", function () { validatePortField(port6El); });
 
 var checking = false;
+var checkLabel = $("checking-indicator").querySelector(".checking-label");
 function setBusy(busy) {
     checking = busy;
     submitBtn.classList.toggle("btn-active", busy);
@@ -170,8 +175,7 @@ function fillForm(q) {
     port6El.value = q.port6;
     editionEl.value = q.edition;
     nofallbackEl.checked = q.nofallback;
-    updatePort4Placeholder();
-    port6El.placeholder = q.port4 || "as IPv4";
+    updatePlaceholders();
     updateSubmit();
 }
 
@@ -262,6 +266,7 @@ function checkFamily(fam, target, ports, edition, log) {
                 result.ip = r.ip;
                 log.push("Resolved " + family + ": " + r.ip);
             }
+            result.cached = r.cached; result.age_s = r.age_s;
             var probed = r.srv ? r.srv.port : port;
             lastPort = probed;
             result.ports_tried.push(probed);
@@ -269,15 +274,13 @@ function checkFamily(fam, target, ports, edition, log) {
                 var how = (r.rtt_ms ? r.rtt_ms + "ms" : "") + (r.cached ? ", cached " + r.age_s + "s ago" : "");
                 var via = r.info && TRANSPORTS[r.info.transport] ? " via " + TRANSPORTS[r.info.transport] : "";
                 log.push("ONLINE: " + family + " responded on port " + probed + via + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
-                result.state = "online"; result.port = probed; result.info = r.info;
-                result.rtt_ms = r.rtt_ms; result.cached = r.cached; result.age_s = r.age_s;
+                result.state = "online"; result.port = probed; result.info = r.info; result.rtt_ms = r.rtt_ms;
                 return result;
             }
             if (r.state === "no_route") {
                 log.push("ERROR: checker has no " + family + " connectivity: " + r.error);
                 result.state = "no_route";
                 result.reason = "The checker host has no " + family + " connectivity" + (r.error ? " (" + r.error + ")" : "");
-                result.cached = r.cached; result.age_s = r.age_s;
                 return result;
             }
             var reason = r.error || "no response";
@@ -286,7 +289,6 @@ function checkFamily(fam, target, ports, edition, log) {
             if (transports.length > 1) transports.forEach(function (s) { log.push("  " + (TRANSPORTS[s] || s) + ": " + r.errors[s]); });
             result.statuses.push({ port: probed, text: reason.charAt(0).toUpperCase() + reason.slice(1) });
             if (r.state === "unreachable") result.rejected = true;
-            result.cached = r.cached; result.age_s = r.age_s;
             return tryPort(r.srv ? ports.length : i + 1);
         });
     }
@@ -374,7 +376,7 @@ function showHealth(h) {
 function runCheck(q) {
     if (retryTimer) {
         clearInterval(retryTimer); retryTimer = null;
-        $("checking-indicator").querySelector(".checking-label").textContent = "Checking\u2026";
+        checkLabel.textContent = "Checking\u2026";
     }
     showNotice("");
     $("results").hidden = true;
@@ -436,17 +438,16 @@ function runCheck(q) {
 
 // reason is the limit the backend names, if it names one.
 function startRetryCountdown(secs, reason) {
-    var label = $("checking-indicator").querySelector(".checking-label");
     var tick = function () {
         if (secs <= 0) {
             clearInterval(retryTimer); retryTimer = null;
             setBusy(false);
-            label.textContent = "Checking\u2026";
+            checkLabel.textContent = "Checking\u2026";
             showNotice("OK - ready to try again.", "ok");
             return;
         }
         showNotice((reason || "Too many requests, slow down") + "!");
-        label.textContent = "Wait " + secs + "s\u2026";
+        checkLabel.textContent = "Wait " + secs + "s\u2026";
         secs--;
     };
     tick();
@@ -459,6 +460,11 @@ function el(tag, cls, text) {
     if (cls) e.className = cls;
     if (text !== undefined) e.textContent = text;
     return e;
+}
+// hint gives node a dotted underline and text as its tooltip.
+function hint(node, text) {
+    node.classList.add("hint");
+    node.title = text;
 }
 function row(key, valueNode, dim) {
     var r = el("div", "ip-row");
@@ -605,9 +611,8 @@ function ipCard(r, label) {
     if (icon) title.appendChild(icon);
     head.appendChild(title);
     var badges = el("span", "badge-group");
-    if (state === "online" || state === "offline" || state === "unreachable" || state === "no_route") {
-        badges.appendChild(el("span", r.cached ? "badge cache" : "badge live", r.cached ? "Cached" : "Live"));
-    }
+    // The states the backend caches say whether this answer came from its cache.
+    if (CACHED_STATES[state]) badges.appendChild(el("span", r.cached ? "badge cache" : "badge live", r.cached ? "Cached" : "Live"));
     if (r.srv) badges.appendChild(el("span", "badge srv", "SRV"));
     if (state === "online" && r.ports_tried.length > 1) badges.appendChild(el("span", "badge fallback", "Fallback"));
     var badgeText = {
@@ -624,9 +629,7 @@ function ipCard(r, label) {
 
     if (r.srv) {
         var redirect = row("Redirect", r.srv.host + ":" + r.srv.port);
-        var key = redirect.firstChild;
-        key.classList.add("hint");
-        key.title = "Redirected by the DNS SRV record " + r.srv_record + ". Game clients follow it too.";
+        hint(redirect.firstChild, "Redirected by the DNS SRV record " + r.srv_record + ". Game clients follow it too.");
         rows.appendChild(redirect);
     }
 
@@ -638,8 +641,7 @@ function ipCard(r, label) {
         if (r.rtt_ms) rows.appendChild(row("Latency", r.rtt_ms + "ms" + (r.cached ? ", cached " + r.age_s + "s ago" : "")));
         if (bare) {
             var details = row("Details", "No info provided", true);
-            details.lastChild.classList.add("hint");
-            details.lastChild.title = BARE_HINT;
+            hint(details.lastChild, BARE_HINT);
             rows.appendChild(details);
         } else {
             rows.appendChild(players(info) ? row("Players", players(info)) : row("Players", "not provided", true));
@@ -664,7 +666,7 @@ function ipCard(r, label) {
             var extraWrap = el("div", "ip-rows-extra");
             extra.forEach(function (kv) {
                 var line = row(kv[0], kv[1]);
-                if (kv[2]) { line.firstChild.classList.add("hint"); line.firstChild.title = kv[2]; }
+                if (kv[2]) hint(line.firstChild, kv[2]);
                 extraWrap.appendChild(line);
             });
             rows.appendChild(extraWrap);

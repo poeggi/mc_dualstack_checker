@@ -24,8 +24,15 @@
             <form class="form" method="get" id="mcform" autocomplete="on">
                 <div class="form-row">
                     <div class="field field-wide">
-                        <label class="text-label text-strong" for="f-host">HOSTNAME | IP ADDRESS</label>
-                        <input name="host" id="f-host" placeholder="e.g. play.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+                        <label class="text-label text-strong label-required" for="f-host">HOSTNAME | IP ADDRESS</label>
+                        <input name="host" id="f-host" placeholder="e.g. mc.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+                    </div>
+                    <div class="field">
+                        <label class="text-label text-strong label-required" for="f-edition">EDITION</label>
+                        <select name="edition" id="f-edition">
+                            <option value="bedrock" selected>Bedrock</option>
+                            <option value="java">Java</option>
+                        </select>
                     </div>
                     <div class="field">
                         <label class="text-label text-strong" for="f-port4">IPv4 PORT</label>
@@ -34,13 +41,6 @@
                     <div class="field">
                         <label class="text-label text-strong" for="f-port6">IPv6 PORT</label>
                         <input name="port6" id="f-port6" placeholder="as IPv4" inputmode="numeric">
-                    </div>
-                    <div class="field">
-                        <label class="text-label text-strong" for="f-edition">EDITION</label>
-                        <select name="edition" id="f-edition">
-                            <option value="bedrock" selected>Bedrock</option>
-                            <option value="java">Java</option>
-                        </select>
                     </div>
                 </div>
                 <div class="form-actions">

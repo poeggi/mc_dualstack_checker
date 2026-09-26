@@ -25,6 +25,8 @@
     --amber-bg:  #221a06;
     --blue:      #4c8ef7;
     --button:    #2d6fd4;
+    --on-accent: #fff;
+    --on-accent-faint: rgba(255, 255, 255, .3);
 
     --mono: ui-monospace, 'Cascadia Code', 'Fira Mono', 'Consolas', monospace;
     --text-xs: .8rem;
@@ -69,6 +71,8 @@ a { color: inherit; }
 /* == 3. Text roles ============================================== */
 .text-title  { font-size: var(--text-lg); font-weight: 600; }
 .text-label  { letter-spacing: var(--tracking); color: var(--label); }
+/* The labels of the fields a check needs read like body text; the optional ports stay in the label colour. */
+.label-required { color: var(--text); }
 .text-caps   { text-transform: uppercase; }
 .text-strong { font-weight: 600; }
 .text-small  { font-size: var(--text-sm); }
@@ -159,7 +163,7 @@ input.input-error { border-color: var(--red); background: var(--red-bg); }
 
 button {
     background: var(--button);
-    color: #fff;
+    color: var(--on-accent);
     border: none;
     border-radius: var(--radius-control);
     padding: .34rem 1rem;
@@ -186,8 +190,8 @@ button.btn-active::after {
     top: 50%;
     width: .85rem;
     height: .85rem;
-    border: 2px solid rgba(255, 255, 255, .3);
-    border-top-color: #fff;
+    border: 2px solid var(--on-accent-faint);
+    border-top-color: var(--on-accent);
     border-radius: 50%;
     transform: translateY(-50%);
     animation: btn-spin .7s linear infinite, btn-fade 10s forwards;
@@ -204,7 +208,6 @@ button.btn-active::after {
     padding: .6rem 1rem;
 }
 .notice-error { color: var(--red);   background: var(--red-bg);   border-color: var(--red); }
-.notice-warn  { color: var(--amber); background: var(--amber-bg); border-color: var(--amber); }
 .notice-ok    { color: var(--green); background: var(--green-bg); border-color: var(--green); }
 
 /* Checking indicator */
@@ -261,12 +264,14 @@ button.btn-active::after {
     white-space: nowrap;
     flex-shrink: 0;
 }
-.badge.online   { background: var(--green);    color: #071a0f; }
-.badge.offline  { background: var(--red);      color: #1a0707; }
+.badge.online   { background: var(--green);    color: var(--bg); }
+.badge.offline  { background: var(--red);      color: var(--bg); }
 .badge.unknown  { background: var(--border);   color: var(--muted); }
+/* Amber: the informational badges and the warning notice */
 .badge.fallback,
 .badge.srv,
-.badge.cache    { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
+.badge.cache,
+.notice-warn    { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
 .badge.live     { background: var(--surface2); color: var(--blue);  border-color: var(--blue); }
 
 .ip-resolved,
@@ -281,15 +286,14 @@ button.btn-active::after {
 .ip-row-key { min-width: calc(11ch + 11 * var(--tracking)); flex-shrink: 0; white-space: nowrap; overflow-wrap: normal; }
 .ip-row-key.hint, .ip-row-val.hint { cursor: help; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: .2em; }
 
-.port-used   { color: var(--green); }
 .port-struck { color: var(--red); text-decoration: line-through; }
 
 /* Extra rows, opened by a hidden checkbox */
 .card-extra-toggle,
 .ip-rows-extra,
-.toggle-less { display: none; }
-.card-extra-toggle:checked ~ .ip-rows-extra             { display: block; }
+.toggle-less,
 .card-extra-toggle:checked ~ .ip-row-toggle .toggle-more { display: none; }
+.card-extra-toggle:checked ~ .ip-rows-extra             { display: block; }
 .card-extra-toggle:checked ~ .ip-row-toggle .toggle-less { display: inline; }
 .ip-row-toggle {
     cursor: pointer;
@@ -307,7 +311,7 @@ button.btn-active::after {
     line-height: var(--leading-log);
     overflow-wrap: anywhere;
 }
-.debug-log .d-ok   { color: var(--green); }
+.debug-log .d-ok, .port-used { color: var(--green); }
 .debug-log .d-err  { color: var(--red); }
 .debug-log .d-warn { color: var(--amber); }
 
