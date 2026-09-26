@@ -3,9 +3,9 @@
 
 // Draws the finished periods the backend publishes under stats/, one file
 // per kind of period: a bar chart of requests or unique clients, split by
-// IP version or by cache use (two switches pick), with a scale, and a
-// table. The data lists the newest period first; the chart shows it
-// rightmost. Each chart spans as many periods as the backend keeps.
+// IP version or by cache use (two switches pick; clients by IP version
+// only), with a scale, and a table. The data lists the newest period
+// first; the chart shows it rightmost. Each chart spans as many periods as the backend keeps.
 var KINDS = [
     ["minutes", "Last 60 minutes", 60], ["hours", "Last 48 hours", 48],
     ["days", "Last 30 days", 30], ["months", "Last 12 months", 12]
@@ -50,6 +50,11 @@ function label(kind, start) {
 var metric = "requests", split = "family";
 function value(r) { return r.ipv4[metric] + r.ipv6[metric]; }
 
+// shown is the split the charts show. Clients are split by IP version only:
+// a client counts as cached only when it got no fresh answer in a period,
+// and a visitor's first check of a server is nearly always fresh.
+function shown() { return metric === "clients" ? "family" : split; }
+
 // recorded tells whether a period is split by cache use; periods from
 // before the split was counted are not.
 function recorded(r) { return !!(r.fresh && r.cached); }
@@ -73,7 +78,8 @@ function showTip(kind, r, bar, touch) {
     var total = value(r);
     tip.textContent = "";
     tip.appendChild(el("div", "tip-head", label(kind, r.start)));
-    [split, split === "family" ? "cache" : "family"].forEach(function (s) {
+    var groups = metric === "clients" ? ["family"] : [split, split === "family" ? "cache" : "family"];
+    groups.forEach(function (s) {
         var group = el("div", "tip-group");
         parts(r, s).forEach(function (p) {
             var line = el("div");
@@ -166,7 +172,7 @@ function chart(kind, rows) {
     var list = rows.slice().reverse();
     list.forEach(function (r) {
         var bar = el("div", "bar");
-        parts(r, split).forEach(function (p) {
+        parts(r, shown()).forEach(function (p) {
             var seg = el("div", p[0]);
             seg.style.height = (p[2] / top * 100) + "%";
             bar.appendChild(seg);
@@ -182,7 +188,7 @@ function chart(kind, rows) {
 function table(kind, rows) {
     var t = el("table"), head = el("tr");
     head.appendChild(el("th", "", ""));
-    SPLITS[split].forEach(function (p) {
+    SPLITS[shown()].forEach(function (p) {
         head.appendChild(el("th", "", p[1] + " clients"));
         head.appendChild(el("th", "", p[1] + " requests"));
     });
@@ -190,7 +196,7 @@ function table(kind, rows) {
     rows.forEach(function (r) {
         var tr = el("tr");
         tr.appendChild(el("td", "", label(kind, r.start)));
-        SPLITS[split].forEach(function (p) {
+        SPLITS[shown()].forEach(function (p) {
             var c = r[p[2]];
             tr.appendChild(el("td", "", c ? String(c.clients) : "-"));
             tr.appendChild(el("td", "", c ? String(c.requests) : "-"));
@@ -252,7 +258,7 @@ var sections = {}, loaded = {}, spans = {};
 // legend shows the keys of the chart's split.
 function legend() {
     document.querySelectorAll(".legend-key").forEach(function (e) {
-        e.hidden = e.dataset.view !== split;
+        e.hidden = e.dataset.view !== shown();
     });
 }
 
@@ -285,8 +291,18 @@ KINDS.forEach(function (k) {
     });
 });
 
+// switches marks the picked buttons. The split switch is off while clients
+// are shown; its pick comes back with requests.
+function switches() {
+    document.querySelectorAll(".switch button").forEach(function (b) {
+        b.classList.toggle("on", b.dataset.metric ? b.dataset.metric === metric : b.dataset.view === shown());
+        b.disabled = !!b.dataset.view && metric === "clients";
+    });
+}
+
 function redraw() {
     unpick();
+    switches();
     legend();
     Object.keys(loaded).forEach(draw);
 }
