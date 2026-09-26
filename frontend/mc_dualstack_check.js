@@ -22,10 +22,11 @@ var HOST_REFRESH_MS = 6500;
 // Milliseconds the page waits for the backend's answer to a probe. The
 // backend answers within 12 s: a name lookup and a probe take at most 10 s.
 var PROBE_TIMEOUT_MS = 12000;
-// Default ports per edition. The IPv6 port defaults to the IPv4 port;
-// Bedrock servers commonly listen on 19133 for IPv6, so that is the first
-// IPv6 fallback. Java clients follow a name's SRV record at srv.port; the
-// backend does the same.
+// The editions, by their name in the API and in links, with their default
+// ports. Each edition also needs an option in the page's edition menu.
+// The IPv6 port defaults to the IPv4 port; Bedrock servers commonly listen
+// on 19133 for IPv6, so that is the first IPv6 fallback. Java clients
+// follow a name's SRV record at srv.port; the backend does the same.
 var EDITIONS = {
     bedrock: { v4: 19132, v6: 19133 },
     java: { v4: 25565, v6: 25565, srv: { port: 25565, record: "_minecraft._tcp." } }
@@ -153,7 +154,7 @@ function toParams(q) {
     return p;
 }
 function fromParams(p) {
-    var edition = p.get("edition") === "java" ? "java" : "bedrock";
+    var edition = Object.prototype.hasOwnProperty.call(EDITIONS, p.get("edition")) ? p.get("edition") : DEFAULT_EDITION;
     return {
         host: (p.get("host") || "").trim(),
         port4: p.get("port4") || p.get("port") || "",

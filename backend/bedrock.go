@@ -23,8 +23,8 @@ const (
 )
 
 // pingBedrock sends a RakNet unconnected ping over the given network
-// ("udp4" or "udp6") and parses the pong string.
-func pingBedrock(ctx context.Context, network, ip string, port int) (*ServerInfo, error) {
+// ("udp4" or "udp6") and parses the pong string. The ping carries no name.
+func pingBedrock(ctx context.Context, network, ip string, port int, _ string) (*ServerInfo, error) {
 	addr := net.JoinHostPort(ip, strconv.Itoa(port))
 	conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 	if err != nil {

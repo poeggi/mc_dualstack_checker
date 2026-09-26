@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -61,25 +63,47 @@ type PingResult struct {
 	AgeS   int         `json:"age_s"`
 }
 
-var editionNetworks = map[string]string{"bedrock": "udp", "java": "tcp"}
+// edition is one Minecraft edition: how its servers are probed, and which
+// SRV record its clients follow.
+type edition struct {
+	// network is "udp" or "tcp"; each probe adds the address family.
+	network string
+	// probe sends one status request to ip and port over network, "udp4"
+	// for instance. host is the name a client would send, "" for a literal
+	// address; editions that do not send one ignore it.
+	probe func(ctx context.Context, network, ip string, port int, host string) (*ServerInfo, error)
+	// At srvPort, clients follow the SRV record _<srvService>._<network>
+	// of a name. srvPort is 0 when they follow none.
+	srvService string
+	srvPort    int
+}
+
+// editions are the editions the API probes, by their name in requests.
+var editions = map[string]edition{
+	"bedrock": {network: "udp", probe: pingBedrock},
+	"java":    {network: "tcp", probe: pingJava, srvService: "minecraft", srvPort: 25565},
+}
+
+const defaultEdition = "bedrock"
+
+// editionError answers a request for an unknown edition.
+var editionError = func() string {
+	names := slices.Sorted(maps.Keys(editions))
+	last := len(names) - 1
+	if last == 0 {
+		return "edition must be " + names[0]
+	}
+	return "edition must be " + strings.Join(names[:last], ", ") + " or " + names[last]
+}()
 
 // ping runs exactly one probe. The address family is taken from ip.
-func ping(ctx context.Context, edition string, ip net.IP, port int, hostLabel string) PingResult {
-	network := editionNetworks[edition]
+func ping(ctx context.Context, ed edition, ip net.IP, port int, host string) PingResult {
+	network := ed.network + "6"
 	if ip.To4() != nil {
-		network += "4"
-	} else {
-		network += "6"
+		network = ed.network + "4"
 	}
-
 	start := time.Now()
-	var info *ServerInfo
-	var err error
-	if edition == "bedrock" {
-		info, err = pingBedrock(ctx, network, ip.String(), port)
-	} else {
-		info, err = pingJava(ctx, network, ip.String(), port, hostLabel)
-	}
+	info, err := ed.probe(ctx, network, ip.String(), port, host)
 	if err == nil {
 		info.clip()
 		return PingResult{State: "online", RTTms: time.Since(start).Milliseconds(), Info: info}

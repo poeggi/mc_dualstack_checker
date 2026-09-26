@@ -199,20 +199,16 @@ func resolveFamily(ctx context.Context, name, family string) (net.IP, error) {
 	return nil, nil
 }
 
-// javaDefaultPort is the only port at which Java clients follow an SRV
-// record; any other port they take as given.
-const javaDefaultPort = 25565
-
-// lookupSRV returns where the _minecraft._tcp SRV record of name sends Java
+// lookupSRV returns where the SRV record _<service>._<proto> of name sends
 // clients, nil when there is none. Clients use the name as given when the
 // lookup fails, and so does this.
-func lookupSRV(ctx context.Context, name string) *SRVTarget {
+func lookupSRV(ctx context.Context, service, proto, name string) *SRVTarget {
 	if localName(name) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, srvTimeout)
 	defer cancel()
-	_, addrs, _ := net.DefaultResolver.LookupSRV(ctx, "minecraft", "tcp", name+".")
+	_, addrs, _ := net.DefaultResolver.LookupSRV(ctx, service, proto, name+".")
 	return srvTarget(addrs)
 }
 
@@ -237,12 +233,13 @@ func lookupReason(err error) string {
 
 func handlePing(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	edition := q.Get("edition")
-	if edition == "" {
-		edition = "bedrock"
+	edName := q.Get("edition")
+	if edName == "" {
+		edName = defaultEdition
 	}
-	if _, ok := editionNetworks[edition]; !ok {
-		httpError(w, http.StatusBadRequest, "edition must be bedrock or java")
+	ed, ok := editions[edName]
+	if !ok {
+		httpError(w, http.StatusBadRequest, editionError)
 		return
 	}
 	port, err := strconv.Atoi(q.Get("port"))
@@ -293,7 +290,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	cached := false
 	defer func() { countPing(client, cached) }()
 
-	// The name sent in the Java handshake: the SRV target when there is one.
+	// The name a client would send: the SRV target when there is one.
 	label := host
 	var srv *SRVTarget
 	if ip == nil {
@@ -303,8 +300,8 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lctx, cancel := context.WithTimeout(r.Context(), resolveTimeout)
-		if edition == "java" && port == javaDefaultPort {
-			if srv = lookupSRV(lctx, host); srv != nil {
+		if ed.srvPort != 0 && port == ed.srvPort {
+			if srv = lookupSRV(lctx, ed.srvService, ed.network, host); srv != nil {
 				label, port = srv.Host, srv.Port
 			}
 		}
@@ -325,13 +322,13 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	// when this client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), pingTimeout)
 	defer cancel()
-	key := edition + "|" + ip.String() + "|" + strconv.Itoa(port)
+	key := edName + "|" + ip.String() + "|" + strconv.Itoa(port)
 	res := cache.get(ctx, key, func() (PingResult, bool) {
 		if !acquireSlot() {
 			return PingResult{State: "busy"}, false
 		}
 		defer releaseSlot()
-		return ping(ctx, edition, ip, port, label), true
+		return ping(ctx, ed, ip, port, label), true
 	})
 	cached = res.Cached
 	if res.State == "busy" {

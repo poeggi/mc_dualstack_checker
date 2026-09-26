@@ -133,6 +133,12 @@ func TestParsePongPorts(t *testing.T) {
 	}
 }
 
+func TestEditionError(t *testing.T) {
+	if editionError != "edition must be bedrock or java" {
+		t.Errorf("editionError = %q", editionError)
+	}
+}
+
 func TestHostName(t *testing.T) {
 	for in, want := range map[string]string{
 		"Play_X.Example-1.net.":          "play_x.example-1.net",
