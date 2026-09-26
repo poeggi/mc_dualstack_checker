@@ -326,6 +326,10 @@ button.btn-active::after {
         --pad-card: .6rem;
     }
     body { padding: .4rem .6rem; }
-    /* The edition and the two ports share one line down to 320 px screens. */
+}
+/* Below 367 px the edition and the two ports no longer fit one line at their
+   normal basis; a smaller one keeps them together down to 319 px. Wider
+   screens keep the normal basis, which decides what joins the host's line. */
+@media (max-width: 366px) {
     .field:not(.field-wide) { flex-basis: 5.5rem; }
 }
