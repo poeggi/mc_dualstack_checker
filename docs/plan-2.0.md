@@ -36,13 +36,14 @@ Target: released before Bedrock 26.60 (2026-10-27).
 - Accepted: status 2xx, body at most 16 KiB, a JSON object with `version` or `name`. `protocol` may be a number or a string.
 - No redirects. Any non-2xx means "no NetherNet", as it does for the client.
 - Field mapping: `name` -> motd, `protocol` -> protocol, `version` -> version, `level` -> map, `players` -> players_online,
-  `maxPlayers` -> players_max, `gameType` -> gamemode (the number as sent; a name mapping needs a verified source first).
+  `maxPlayers` -> players_max, `gameType` -> gamemode (0 Survival, 1 Creative, 2 Adventure; other numbers as sent).
   `edition` stays empty; the scheme names the transport.
 - The result says that signalling answered and that the game path (WebRTC over UDP) is not tested.
 
 ### D3. Weak answers
 
 - A RakNet pong with the magic but no string (BDS-23066, 33 bytes) and a NetherNet 2xx without JSON are weak answers.
+  Vanilla BDS sends both when `enable-lan-visibility=false` (measured on 1.26.50.5 to 1.26.60.28).
 - A weak answer alone gives `state: online` with `info` holding only `scheme`. The page shows "answered without status".
 
 ### D4. API additions (`docs/api.md`)
@@ -119,7 +120,6 @@ Decisions:
 
 ## Open facts to settle while implementing
 
-- The `gameType` numbers of `/v1/join` (D2): find a primary source before mapping to names.
 - Plain HTTP on every BDS version with NetherNet, and `/v1/join` over IPv6 on a live BDS.
 
 ## Order of work

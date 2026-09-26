@@ -64,15 +64,30 @@ Frontend (`frontend/mc_dualstack_check.js`):
 - `GET /v1/join` on TCP `server-port`. No auth.
   Answers 2xx and JSON: `name, protocol, version, level, players, maxPlayers, gameType`.
   Any non-2xx means "no NetherNet".
-- It has no port4/port6 and no server ID.
-- BDS answers plain HTTP and TLS on the same port (a health check over plain HTTP passes while
-  a client's TLS handshake runs: https://github.com/itzg/docker-minecraft-bedrock-server/issues/680).
-  mc-monitor in "auto" mode sends `GET http://host:port/v1/join` with a 3 s timeout, then falls back to RakNet:
-  https://github.com/itzg/mc-monitor/pull/172
-- A 1.26.51 client opened with a TLS ClientHello on 19132 and did not fall back to plain HTTP against
-  a server without TLS: https://github.com/Pumpkin-MC/Pumpkin/issues/3738
-  A third-party comment says "HTTPS then HTTP". Mojang's guide states no order. Unverified.
+- It has no port4/port6 and no server ID. `gameType` is 0 Survival, 1 Creative, 2 Adventure (Mojang's guide).
+- Measured 2026-09-26 on BDS 1.26.50.5, 1.26.51.1, 1.26.52.3 and 1.26.60.28 (Linux, loopback, IPv4 and IPv6,
+  plain HTTP, any User-Agent):
+  - `enable-lan-visibility=true`: `{"name":"Dedicated Server","protocol":2193,"version":"1.26.52","level":"Bedrock level",
+    "players":0,"maxPlayers":10,"gameType":0}`. `name` is `server-name`, `level` is `level-name`.
+  - `enable-lan-visibility=false`: `200`, `Content-Type: application/json`, `Content-Length: 0`.
+    The same setting cuts the RakNet pong to 33 bytes (B4).
+  - Every standard TLS ClientHello gets alert 40 (handshake failure): TLS 1.2 with each cipher, TLS 1.3 with each
+    group and signature type, PSK, a client certificate. BDS has no TLS certificate; the alert means "no TLS here".
+  - The server binds TCP `[::]:server-port` and UDP 7551, also with LAN visibility off.
+- The client tries TLS first (ALPN `h2, http/1.1`, no SNI) and falls back to plain HTTP. Seen in third-party code,
+  not in first-party code: df-mc/go-nethernet `endpoint/handler.go` (order https host:port, https host, http host:port,
+  http host), CloudburstMC Network branch `nethernet` (`NetherNetHTTPClientSignaling.java`, "like the retail client"),
+  MiNET (refuses TLS "the way BDS does so the client falls back to plaintext").
+  Its User-Agent is `libhttpclient/1.0.0.0` (go-nethernet `client.go`).
+  A 1.26.51 client against a plain-HTTP server that answered the ClientHello with a plaintext 400 did not fall back:
+  https://github.com/Pumpkin-MC/Pumpkin/issues/3738
   Over plain HTTP the client pins the operator key on first use (TOFU prompt).
+- mc-monitor in "auto" mode sends `GET http://host:port/v1/join` with a 3 s timeout, then falls back to RakNet:
+  https://github.com/itzg/mc-monitor/pull/172
+- Third-party servers differ: Pumpkin serves plain HTTP only; CloudburstMC (WaterdogPE, Geyser) serves TLS and HTTP
+  on one port or rejects TLS; GeyserNetherNet requires an HTTPS keystore.
+- The client shows `name` as the MOTD of a NetherNet server (Mojang's guide: "to display server details prior to
+  connecting"; go-nethernet `status.go`).
 - Answers vary: `protocol` comes as a number or a string (mc-monitor accepts both);
   a relay answered 2xx with an empty text/plain body: https://github.com/GeyserMC/GeyserNetherNet/issues/3
 - A 2xx proves only the TCP signalling path. Game traffic is WebRTC over UDP on other ports.
@@ -204,7 +219,7 @@ Frontend (`frontend/mc_dualstack_check.js`):
 
 ## Not verified
 
-- Which order the client uses for HTTPS and plain HTTP (B2).
+- The client's HTTPS-then-HTTP order and User-Agent come from third-party code only (B2).
 - Whether a trailing dot appears in the SRV target the client sends.
 - That no pong format change and no other client ping change is coming (B4, B6).
 - Fake protocol numbers from maintenance plugins and colour codes in `version.name` (J6).
