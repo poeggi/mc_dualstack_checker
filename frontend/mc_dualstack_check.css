@@ -232,6 +232,7 @@ button.btn-active::after {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--gap);
+    align-items: start;
 }
 
 /* IP card: .card plus a state (online, offline, unknown) */
