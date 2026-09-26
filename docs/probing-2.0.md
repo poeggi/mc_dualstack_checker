@@ -2,8 +2,9 @@
 
 Input for the 2.0 design. Collected 2026-09-26 by web research and
 checked against primary sources the same day. Claims marked "unverified"
-rest on secondary sources or single observations. The decisions are in
-[plan-2.0.md](plan-2.0.md).
+rest on secondary sources or single observations. The decisions went into
+README.md, [api.md](api.md) (section "Changes in 2.0") and the code, released as
+v2.0.0 on 2026-09-26.
 
 ## Goal
 
@@ -226,3 +227,14 @@ Frontend (`frontend/mc_dualstack_check.js`):
 - Whether a trailing dot appears in the SRV target the client sends.
 - That no pong format change and no other client ping change is coming (B4, B6).
 - Fake protocol numbers from maintenance plugins and colour codes in `version.name` (J6).
+
+## Known limits
+
+- The client's TLS-then-HTTP order and its User-Agent come from third-party code, not from first-party code.
+- The game path (WebRTC over UDP) is not probed; a NetherNet answer proves the signalling only.
+- Java 26.4 is a snapshot. Recheck the ID format at its first pre-release.
+- A 26.4 server reads the handshake host as at most 1024 characters, older servers 255. `host?_id=<id>` beyond a
+  server's limit is refused like a wrong ID; the game has the same limit.
+- The race costs a RakNet-only server nothing when its TCP port refuses, and up to 750 ms (head start plus grace)
+  when a firewall drops TCP silently.
+- The legacy 0xFE Java ping is not sent; a server that answers only that shows as offline.
