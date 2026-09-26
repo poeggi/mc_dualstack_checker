@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f1117">
     <title>Minecraft Server Dualstack Checker - IPv4 &amp; IPv6 Status</title>
     <meta name="description" content="Check the online status of any Minecraft server over both IPv4 and IPv6. Supports Bedrock and Java editions with automatic port fallback.">
     <meta name="keywords" content="Minecraft server status, Minecraft dualstack server checker, IPv4 IPv6 dual stack, Bedrock server status, Java server status, MC server ping, Minecraft online checker">
@@ -25,7 +26,7 @@
                 <div class="form-row">
                     <div class="field field-wide">
                         <label class="text-label text-strong label-required" for="f-host">HOSTNAME | IP ADDRESS</label>
-                        <input name="host" id="f-host" placeholder="e.g. mc.example.com" inputmode="url" autocomplete="url" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+                        <input name="host" id="f-host" placeholder="e.g. mc.example.com" inputmode="url" autocomplete="url" enterkeyhint="go" autocapitalize="none" autocorrect="off" spellcheck="false" required>
                     </div>
                     <div class="field">
                         <label class="text-label text-strong label-required" for="f-edition">EDITION</label>
@@ -36,11 +37,11 @@
                     </div>
                     <div class="field">
                         <label class="text-label text-strong" for="f-port4">IPv4 PORT</label>
-                        <input name="port4" id="f-port4" placeholder="19132" inputmode="numeric">
+                        <input name="port4" id="f-port4" placeholder="19132" inputmode="numeric" enterkeyhint="go">
                     </div>
                     <div class="field">
                         <label class="text-label text-strong" for="f-port6">IPv6 PORT</label>
-                        <input name="port6" id="f-port6" placeholder="as IPv4" inputmode="numeric">
+                        <input name="port6" id="f-port6" placeholder="as IPv4" inputmode="numeric" enterkeyhint="go">
                     </div>
                 </div>
                 <div class="form-actions">
