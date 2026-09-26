@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: write the settings into the page and api.php
         # The values end up inside HTML attributes, PHP string literals and

@@ -9,10 +9,13 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      # The newest stable Go; go.mod keeps the oldest one the code needs.
+      # The module has no dependencies, so there is nothing to cache.
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: backend/go.mod
+          go-version: stable
+          cache: false
       - name: gofmt
         working-directory: backend
         run: test -z "$(gofmt -l .)"
@@ -28,10 +31,10 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: lts/*
       - run: node --check frontend/mc_dualstack_check.js
       - name: local includes carry a version stamp
         run: |
