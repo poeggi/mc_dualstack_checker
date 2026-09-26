@@ -122,7 +122,7 @@ type edition struct {
 
 // editions are the editions the API probes, by their name in requests.
 var editions = map[string]edition{
-	"bedrock": {schemes: []scheme{raknet}},
+	"bedrock": {schemes: []scheme{nethernet, raknet}},
 	"java":    {schemes: []scheme{slp}, srvService: "minecraft", srvPort: 25565, connectionIDs: true},
 }
 
@@ -143,7 +143,7 @@ const (
 	// headStart is how long a scheme runs alone before the next starts.
 	headStart = 250 * time.Millisecond
 	// grace is how long a status from a later scheme waits for the more
-	// preferred schemes that still run.
+	// preferred schemes that still run, and a weak answer for any status.
 	grace = 500 * time.Millisecond
 )
 
@@ -155,15 +155,18 @@ type outcome struct {
 	err  error
 }
 
+// answered reports whether o brought an answer, a status or a weak one.
+func (o *outcome) answered() bool { return o != nil && o.err == nil }
+
 // status reports whether o brought a status, more than a weak answer.
-func (o *outcome) status() bool { return o != nil && o.err == nil && !o.info.weak }
+func (o *outcome) status() bool { return o.answered() && !o.info.weak }
 
 // ping probes t with the edition's schemes. The first starts at once, each
 // next one headStart later, or at once when all started ones have ended
 // without a status. The most preferred status wins; a status from a later
 // scheme waits at most grace for the ones before it. A weak answer counts
-// only when no scheme brings a status. The address family is taken from
-// t.ip.
+// when no scheme brings a status within grace. The address family is taken
+// from t.ip.
 func ping(ctx context.Context, ed edition, t target) PingResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -189,8 +192,8 @@ func ping(ctx context.Context, ed edition, t target) PingResult {
 	defer next.Stop()
 	var graceUp <-chan time.Time
 	for {
-		// The most preferred scheme that has not failed decides: its
-		// status wins, and while it runs the others wait for it.
+		// The most preferred scheme that runs or brought a status decides:
+		// its status wins, and while it runs the others wait for it.
 		first := -1
 		for i := 0; i < started && first < 0; i++ {
 			if ended[i] == nil || ended[i].status() {
@@ -201,7 +204,7 @@ func ping(ctx context.Context, ed edition, t target) PingResult {
 		case first >= 0 && ended[first] != nil:
 			return ed.online(ended[first])
 		case first >= 0:
-			if graceUp == nil && anyStatus() {
+			if graceUp == nil && slices.ContainsFunc(ended, (*outcome).answered) {
 				graceUp = time.After(grace)
 			}
 		case started < n:
@@ -220,7 +223,10 @@ func ping(ctx context.Context, ed edition, t target) PingResult {
 				next.Reset(headStart)
 			}
 		case <-graceUp:
-			return ed.online(ended[slices.IndexFunc(ended, (*outcome).status)])
+			if i := slices.IndexFunc(ended, (*outcome).status); i >= 0 {
+				return ed.online(ended[i])
+			}
+			return ed.online(ended[slices.IndexFunc(ended, (*outcome).answered)])
 		}
 	}
 }
@@ -240,10 +246,8 @@ func (ed edition) online(o *outcome) PingResult {
 // preferred weak answer, else the failure of the classic scheme, with the
 // error of each scheme.
 func (ed edition) settle(ended []*outcome, ip net.IP) PingResult {
-	for _, o := range ended {
-		if o.err == nil {
-			return ed.online(o)
-		}
+	if i := slices.IndexFunc(ended, (*outcome).answered); i >= 0 {
+		return ed.online(ended[i])
 	}
 	res := failure(ended[len(ended)-1].err, ip)
 	res.Errors = make(map[string]string, len(ended))

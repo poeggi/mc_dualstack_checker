@@ -72,15 +72,21 @@ func pingBedrock(ctx context.Context, network string, t target) (*ServerInfo, ti
 
 // parsePong decodes an unconnected pong:
 // 0x1c | time(8) | server GUID(8) | magic(16) | strlen(2) | payload.
+// A pong that ends after the magic, or carries no payload, is a weak
+// answer: vanilla sends one when its LAN visibility is off.
 func parsePong(b []byte) (*ServerInfo, error) {
-	const hdr = 1 + 8 + 8 + 16 + 2
-	if len(b) < hdr || b[0] != raknetUnconnectedPong {
+	const magicEnd = 1 + 8 + 8 + 16
+	const hdr = magicEnd + 2
+	if len(b) < magicEnd || b[0] != raknetUnconnectedPong {
 		return nil, probeError("not an unconnected pong")
 	}
-	if !bytes.Equal(b[17:33], raknetMagic) {
+	if !bytes.Equal(b[17:magicEnd], raknetMagic) {
 		return nil, probeError("bad raknet magic")
 	}
-	slen := int(binary.BigEndian.Uint16(b[33:35]))
+	if len(b) < hdr || binary.BigEndian.Uint16(b[magicEnd:hdr]) == 0 {
+		return &ServerInfo{weak: true}, nil
+	}
+	slen := int(binary.BigEndian.Uint16(b[magicEnd:hdr]))
 	if hdr+slen > len(b) {
 		slen = len(b) - hdr
 	}

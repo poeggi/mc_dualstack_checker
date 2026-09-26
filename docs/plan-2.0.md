@@ -23,7 +23,7 @@ Target: released before Bedrock 26.60 (2026-10-27).
   - The next starts 250 ms later, or as soon as the one before it has failed.
   - A complete answer from the preferred scheme wins, even if a later scheme answered first.
   - When a later scheme answers while the preferred one is still pending, the result waits for the preferred one at most 500 ms.
-  - A weak answer (D3) loses to any complete one. Alone, it still means online.
+  - A weak answer (D3) loses to any complete one and waits for one at most 500 ms. Alone, it still means online.
 - Cost for a RakNet-only server: at most 250 ms. Cost on total failure: unchanged, at most 4 s.
 - The probe budget (`pingTimeout`, 6 s), the in-flight slots and the limits do not change.
 
@@ -45,7 +45,8 @@ Target: released before Bedrock 26.60 (2026-10-27).
 
 ### D3. Weak answers
 
-- A RakNet pong with the magic but no string (BDS-23066, 33 bytes) and a NetherNet 2xx without JSON are weak answers.
+- A RakNet pong with the magic but no string (BDS-23066, 33 bytes) and a NetherNet 2xx with an empty body are weak answers.
+  A 2xx with another body that is no status (a web page) is invalid data, not a weak answer.
   Vanilla BDS sends both when `enable-lan-visibility=false` (measured on 1.26.50.5 to 1.26.60.28).
 - A weak answer alone gives `state: online` with `info` holding only `scheme`. The page says the server answered
   but hides its details, and names the likely cause (`enable-lan-visibility=false`). Wording is settled with the mockups.

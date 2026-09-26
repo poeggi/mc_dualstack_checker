@@ -24,6 +24,40 @@ for u in "$B" "$F"; do
 done
 
 PY=python3; "$PY" -c pass >/dev/null 2>&1 || PY=python
+
+# Fake Bedrock servers on loopback: a NetherNet status and a RakNet pong
+# on one port number, a RakNet pong alone on the next.
+NN=$((PORT + 10)); RK=$((PORT + 11))
+"$PY" - "$NN" "$RK" >/dev/null 2>&1 <<'EOF' &
+import socket, sys, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+nn, rk = int(sys.argv[1]), int(sys.argv[2])
+class Join(BaseHTTPRequestHandler):
+    def do_GET(self):
+        b = b'{"name":"Fake NetherNet","protocol":2193,"version":"1.26.52","players":1,"maxPlayers":10,"gameType":0}'
+        if self.path != "/v1/join":
+            b = b""
+        self.send_response(200 if b else 404)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+    def log_message(self, *a):
+        pass
+def pong(port):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", port))
+    while True:
+        d, a = s.recvfrom(2048)
+        p = b"MCPE;Fake RakNet;766;1.21.50;2;20;7;Level;Survival;1;%d;%d;" % (port, port)
+        s.sendto(b"\x1c" + d[1:9] + (7).to_bytes(8, "big") + d[9:25] + len(p).to_bytes(2, "big") + p, a)
+for port in (nn, rk):
+    threading.Thread(target=pong, args=(port,), daemon=True).start()
+HTTPServer(("127.0.0.1", nn), Join).serve_forever()
+EOF
+bpid=$!
+trap 'kill $pid $fpid $bpid 2>/dev/null; rm -rf "$STATS"' EXIT
+i=0
+while [ "$i" -lt 20 ] && ! curl -fsS "http://127.0.0.1:$NN/v1/join" >/dev/null 2>&1; do sleep 1; i=$((i + 1)); done
 fails=0
 ok()   { echo "ok    $1"; }
 fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
@@ -60,6 +94,12 @@ check "id with a space inside ok"   json "$B/ping?ip=127.0.0.1&port=9&edition=ja
 status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null
 check "cache keeps IDs apart"       json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "not d.get('cached')"
 check "same ID is cached"           json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "d.get('cached')"
+
+echo "== bedrock schemes"
+CLIENT=198.51.100.6
+check "NetherNet wins when both answer" json "$B/ping?ip=127.0.0.1&port=$NN&edition=bedrock" "d['info']['scheme'] == 'nethernet' and d['info']['motd'] == 'Fake NetherNet' and d['info']['gamemode'] == 'Survival'"
+check "RakNet alone answers"        json "$B/ping?ip=127.0.0.1&port=$RK&edition=bedrock" "d['info']['scheme'] == 'raknet' and d['info']['motd'] == 'Fake RakNet'"
+check "errors name both schemes"    json "$B/ping?ip=127.0.0.1&port=9&edition=bedrock" "sorted(d['errors']) == ['nethernet', 'raknet']"
 
 echo "== name lookups (localtest.me is public DNS for 127.0.0.1)"
 CLIENT=198.51.100.2

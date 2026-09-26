@@ -1,7 +1,7 @@
 # Minecraft Dualstack Checker
 
 Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
-Supports Bedrock (RakNet ping, UDP) and Java (Server List Ping, TCP).
+Supports Bedrock (NetherNet status over TCP and RakNet ping over UDP, raced) and Java (Server List Ping, TCP, with connection IDs).
 A backend on a dual-stack VM does the probing.
 
 ![Icon](frontend/favicon.svg) Live Website: 
@@ -65,8 +65,8 @@ The backend listens on `127.0.0.1` only. It does not probe internal addresses. T
 
 ## Tests
 
-- `cd backend && go test ./...` checks how failed probes are classified, the Java probe against a fake server (connection IDs, Ping and Pong, no status), the status and text component parser, text clipping and the usage counters.
-- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, connection IDs, name lookups, the internal-address filter, the cache and the limits.
+- `cd backend && go test ./...` checks how failed probes are classified, the race of the Bedrock schemes, the NetherNet probe against fake plain and HTTPS servers, weak answers, the Java probe against a fake server (connection IDs, Ping and Pong, no status), the status and text component parser, text clipping and the usage counters.
+- `sh test/backend.sh` starts the backend locally and checks endpoints, validation, connection IDs, the Bedrock schemes against fake servers, name lookups, the internal-address filter, the cache and the limits.
 - `sh test/live.sh` checks a deployed web interface and API end to end. It reads `WEB` (page URL), `API` (API URL), `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server) and `LIVE_JAVA_HOST` (a Java server). Each part runs only when its setting is given.
 
 CI runs the first two on pushes to main and on pull requests. The "Live check" workflow runs `test/live.sh` after each frontend deploy, once it sees the released version on the VM, plus daily and on demand. It takes `WEB` from the variable `LIVE_URL`, `API` from the variable `MC_BACKEND`, and the two server names from secrets of the same names.

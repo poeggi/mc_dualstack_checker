@@ -42,6 +42,8 @@ func TestRace(t *testing.T) {
 		{"next starts when the first fails", fakeScheme("a", 20*ms, "error"), fakeScheme("b", 10*ms, "status"), "b", "b", 25 * ms, 150 * ms},
 		{"weak loses to a status", fakeScheme("a", 20*ms, "weak"), fakeScheme("b", 10*ms, "status"), "b", "b", 25 * ms, 150 * ms},
 		{"weak alone", fakeScheme("a", 20*ms, "weak"), fakeScheme("b", 10*ms, "error"), "a", "", 25 * ms, 150 * ms},
+		{"weak waits grace at most", fakeScheme("a", 20*ms, "weak"), fakeScheme("b", 3*time.Second, "error"), "a", "", 510 * ms, 650 * ms},
+		{"late status beats weak", fakeScheme("a", 20*ms, "weak"), fakeScheme("b", 300*ms, "status"), "b", "b", 310 * ms, 450 * ms},
 		{"all fail", fakeScheme("a", 20*ms, "error"), fakeScheme("b", 30*ms, "error"), "", "", 45 * ms, 150 * ms},
 	} {
 		ed := edition{schemes: []scheme{c.a, c.b}}
