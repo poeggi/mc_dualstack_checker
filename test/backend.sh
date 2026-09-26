@@ -55,7 +55,8 @@ check "name resolved by the backend" json "$B/ping?host=localtest.me&family=4&po
 check "trailing dot accepted"       json "$B/ping?host=LocalTest.me.&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1'"
 check "name without family -> 400"  is "$B/ping?host=localtest.me&port=9" 400
 check "neither ip nor host -> 400"  is "$B/ping?port=9" 400
-check "invalid name -> 400"         is "$B/ping?host=bad_name.example.com&family=4&port=9" 400
+check "invalid name -> 400"         is "$B/ping?host=bad!name.example.com&family=4&port=9" 400
+check "underscore in a name accepted" json "$B/ping?host=bad_name.example&family=4&port=9" "d['state'] == 'no_dns'"
 check "missing record -> no_dns"    json "$B/ping?host=does-not-exist-7f3a.poggensee.it&family=4&port=9" "d['state'] == 'no_dns'"
 CLIENT=198.51.100.3
 check "single label, no lookup"     json "$B/ping?host=localhost&family=4&port=9" "d['state'] == 'no_dns'"

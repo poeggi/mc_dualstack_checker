@@ -543,7 +543,10 @@ function ipCard(r, label) {
     var icon = state === "online" ? iconURL(r.info) : "";
     if (icon) {
         var img = el("img", "head-icon");
-        img.src = icon; img.alt = ""; img.width = 20; img.height = 20;
+        img.alt = ""; img.width = 20; img.height = 20;
+        // A Content-Security-Policy without data: images blocks the icon.
+        img.onerror = function () { img.remove(); };
+        img.src = icon;
         title.appendChild(img);
     }
     head.appendChild(title);
