@@ -44,10 +44,13 @@ jobs:
           if grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' ../deploy/www/*.html; then
             echo "local include without a version stamp" >&2; exit 1
           fi
-          sed -i -e "s|id=\"api-version\">[^<]*<|id=\"api-version\">$TAG<|" \
-                 -e "s|?v=[^\"]*\"|?v=$TAG\"|g" ../deploy/www/*.html
-          n=$(cat ../deploy/www/*.html | grep -o '?v=[^"]*"' | wc -l)
-          m=$(cat ../deploy/www/*.html | grep -o -F "?v=$TAG\"" | wc -l)
+          for f in ../deploy/www/*.html; do
+            sed -e "s|id=\"api-version\">[^<]*<|id=\"api-version\">$TAG<|" \
+                -e "s|?v=[^\"]*\"|?v=$TAG\"|g" "$f" > "$f.new"
+            mv "$f.new" "$f"
+          done
+          n=$(awk '{ while (match($0, /[?]v=[^"]*"/)) { n++; $0 = substr($0, RSTART + RLENGTH) } } END { print n + 0 }' ../deploy/www/*.html)
+          m=$(awk -v s="?v=$TAG\"" '{ while ((i = index($0, s)) > 0) { m++; $0 = substr($0, i + length(s)) } } END { print m + 0 }' ../deploy/www/*.html)
           [ "$n" -gt 0 ] && [ "$n" -eq "$m" ] || { echo "$m of $n stamps carry $TAG" >&2; exit 1; }
           grep -q -F "id=\"api-version\">$TAG<" ../deploy/www/index.html
           grep -q -F "id=\"api-version\">$TAG<" ../deploy/www/stats.html

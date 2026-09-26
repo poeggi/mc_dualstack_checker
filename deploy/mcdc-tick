@@ -43,7 +43,7 @@ curl() {
 # put <src> <dst> <mode>: installs src by rename, so a running copy of dst
 # (this script, the backend binary) stays intact.
 put() {
-    install -m "$3" "$1" "$2.new" && mv -f "$2.new" "$2"
+    rm -f "$2.new" && cp "$1" "$2.new" && chmod "$3" "$2.new" && mv -f "$2.new" "$2"
 }
 
 caddy_update() {
@@ -75,7 +75,7 @@ trusted_render() {
     done)
     addrs=${addrs% }
     [ -n "$addrs" ] || { echo "trusted host $host does not resolve, keeping its addresses" >&2; return 0; }
-    sed -i "s|^\([[:space:]]*trusted_proxies\) .*|\1 $addrs|" "$1"
+    sed "s|^\([[:space:]]*trusted_proxies\) .*|\1 $addrs|" "$1" > "$1.new" && mv -f "$1.new" "$1"
 }
 
 # trust_update brings the installed Caddy config to the trusted host's
@@ -156,5 +156,11 @@ caddy_update || echo "caddy update failed, keeping the current one" >&2
 release_update || echo "update failed, keeping current version" >&2
 trust_update || echo "trusted proxies update failed, keeping the current ones" >&2
 
-[ "$BUSY_SECONDS" -gt 0 ] && { timeout "$BUSY_SECONDS" sh -c 'while :; do :; done' || true; }
+# The loop also ends when this script is gone, so it never outlives it.
+if [ "$BUSY_SECONDS" -gt 0 ]; then
+    sh -c 'while kill -0 "$1" 2>/dev/null; do i=0; while [ "$i" -lt 10000 ]; do i=$((i + 1)); done; done' sh "$$" &
+    busy=$!
+    sleep "$BUSY_SECONDS"
+    kill "$busy" 2>/dev/null || true
+fi
 exit 0

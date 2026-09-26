@@ -30,11 +30,13 @@ jobs:
           want: ${{ github.event.workflow_run.head_branch }}
           API: ${{ vars.MC_BACKEND }}
         run: |
-          for i in $(seq 1 60); do
+          i=1
+          while [ "$i" -le 60 ]; do
             got=$(curl -fsS "${API%/}/health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
             echo "attempt $i: want $want, got $got"
             [ "$got" = "$want" ] && exit 0
             sleep 15
+            i=$((i + 1))
           done
           exit 1
 

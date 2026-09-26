@@ -19,7 +19,8 @@ PORT=$((PORT + 1)) go run . >/dev/null 2>&1 &
 fpid=$!
 trap 'kill $pid $fpid 2>/dev/null; rm -rf "$STATS"' EXIT
 for u in "$B" "$F"; do
-    for i in $(seq 1 60); do curl -fsS "$u/health" >/dev/null 2>&1 && break; sleep 1; done
+    i=0
+    while [ "$i" -lt 60 ] && ! curl -fsS "$u/health" >/dev/null 2>&1; do sleep 1; i=$((i + 1)); done
 done
 
 PY=python3; "$PY" -c pass >/dev/null 2>&1 || PY=python
@@ -80,7 +81,8 @@ check "second identical probe is cached" json "$B/ping?ip=127.0.0.1&port=9&editi
 
 echo "== limits"
 CLIENT=203.0.113.6
-for i in $(seq 1 16); do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; done
+i=0
+while [ "$i" -lt 16 ]; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null; i=$((i + 1)); done
 check "budget: 17th request at once -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
 check "429 names the budget"        json "$B/health" "'slow down' in d['error']"
 check "429 says when the batch comes" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | tr -d '\r' | grep -qiE '^Retry-After: [1-7]\$'"

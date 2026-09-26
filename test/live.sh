@@ -35,6 +35,8 @@ status() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
 is() { [ "$(status "$1")" = "$2" ]; }
 # header <headers> <pattern>: exits 0 when a header line matches pattern
 header() { printf '%s\n' "$1" | tr -d '\r' | grep -qi "$2"; }
+# stamps: the ?v= stamps of the includes in stdin, one per line
+stamps() { awk '{ while (match($0, /[?]v=[^"]*"/)) { print substr($0, RSTART, RLENGTH); $0 = substr($0, RSTART + RLENGTH) } }'; }
 # json <url> <python expression over d>: exits 0 when the expression is true
 json() { curl -s "$1" | "$PY" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)"; }
 # has <json> <python expression over d>: exits 0 when the expression is true
@@ -74,7 +76,7 @@ if [ -n "$WEB" ]; then
     fi
     check "page names its version"  header "$page" 'data-version="[^"]'
     webv=$(printf '%s\n' "$page" | sed -n 's/.*data-version="\([^"]*\)".*/\1/p')
-    check "includes stamped with the version" [ "$(printf '%s\n' "$page" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$webv\"" ]
+    check "includes stamped with the version" [ "$(printf '%s\n' "$page" | stamps | sort -u)" = "?v=$webv\"" ]
     check "script cached for an hour" header "$(curl -s -D - -o /dev/null "$WEB/mc_dualstack_check.js?v=$webv")" "^cache-control: .*max-age=3600"
     check "health copy: ok, ipv6"   has "$(host_health)" "d['ok'] and d['ipv6']"
     check "no config endpoint -> 404" is "$WEB/api/config" 404
@@ -135,8 +137,8 @@ if [ -n "$API" ]; then
     check "no server banner"            sh -c "! curl -s -D - -o /dev/null '$API/ping?ip=nope&port=1' | grep -qiE '^(server|via):'"
     check "landing page shows version"  sh -c "curl -s '$API/' | grep -q 'id=\"api-version\">v'"
     pagev=$(curl -s "$API/" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')
-    check "landing page includes stamped" [ "$(curl -s "$API/" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
-    check "usage page includes stamped" [ "$(curl -s "$API/stats" | grep -o '?v=[^"]*"' | sort -u)" = "?v=$pagev\"" ]
+    check "landing page includes stamped" [ "$(curl -s "$API/" | stamps | sort -u)" = "?v=$pagev\"" ]
+    check "usage page includes stamped" [ "$(curl -s "$API/stats" | stamps | sort -u)" = "?v=$pagev\"" ]
     check "usage page shows version"    [ "$(curl -s "$API/stats" | sed -n 's/.*id="api-version">\([^<]*\)<.*/\1/p')" = "$pagev" ]
     check "script cached for an hour"   header "$(curl -s -D - -o /dev/null "$API/stats.js?v=$pagev")" "^cache-control: public, max-age=3600"
     sleep 4

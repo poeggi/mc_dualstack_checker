@@ -42,18 +42,20 @@ jobs:
           if grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html; then
             echo "local include without a version stamp" >&2; exit 1
           fi
-          sed -i -e "s|data-api=\"[^\"]*\"|data-api=\"$API\"|" \
-                 -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
-                 -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" \
-                 -e "s|?v=[^\"]*\"|?v=$VERSION\"|g" frontend/index.html
-          sed -i -e "s|^define('MC_BACKEND', '[^']*');|define('MC_BACKEND', '$API');|" \
-                 -e "s|^define('MC_VERSION', '[^']*');|define('MC_VERSION', '$VERSION');|" frontend/api.php
+          sed -e "s|data-api=\"[^\"]*\"|data-api=\"$API\"|" \
+              -e "s|data-version=\"[^\"]*\"|data-version=\"$VERSION\"|" \
+              -e "s|id=\"version\">[^<]*<|id=\"version\">$VERSION<|" \
+              -e "s|?v=[^\"]*\"|?v=$VERSION\"|g" frontend/index.html > frontend/index.html.new
+          mv frontend/index.html.new frontend/index.html
+          sed -e "s|^define('MC_BACKEND', '[^']*');|define('MC_BACKEND', '$API');|" \
+              -e "s|^define('MC_VERSION', '[^']*');|define('MC_VERSION', '$VERSION');|" frontend/api.php > frontend/api.php.new
+          mv frontend/api.php.new frontend/api.php
           grep -F "<body data-api=\"$API\" data-version=\"$VERSION\">" frontend/index.html
           grep -F "define('MC_BACKEND', '$API');" frontend/api.php
           grep -F "define('MC_VERSION', '$VERSION');" frontend/api.php
           # Every include stamp carries the release, or the upload stops.
-          n=$(grep -o '?v=[^"]*"' frontend/index.html | wc -l)
-          m=$(grep -o -F "?v=$VERSION\"" frontend/index.html | wc -l)
+          n=$(awk '{ while (match($0, /[?]v=[^"]*"/)) { n++; $0 = substr($0, RSTART + RLENGTH) } } END { print n + 0 }' frontend/index.html)
+          m=$(awk -v s="?v=$VERSION\"" '{ while ((i = index($0, s)) > 0) { m++; $0 = substr($0, i + length(s)) } } END { print m + 0 }' frontend/index.html)
           [ "$n" -gt 0 ] && [ "$n" -eq "$m" ] || { echo "$m of $n stamps carry $VERSION" >&2; exit 1; }
 
       - name: install lftp
