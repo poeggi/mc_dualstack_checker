@@ -18,6 +18,8 @@ import (
 // ServerInfo is what a successful ping yields, independent of edition. The
 // player counts are left out when the server sends none.
 type ServerInfo struct {
+	// Scheme is how the server answered: "raknet", "nethernet" or "slp".
+	Scheme        string `json:"scheme"`
 	Edition       string `json:"edition,omitempty"`
 	MOTD          string `json:"motd,omitempty"`
 	Version       string `json:"version,omitempty"`
@@ -36,6 +38,9 @@ type ServerInfo struct {
 	Contact string `json:"contact,omitempty"`
 	Port4   int    `json:"port4,omitempty"`
 	Port6   int    `json:"port6,omitempty"`
+	// weak marks an answer without a status: the server is there but
+	// tells nothing about itself.
+	weak bool
 }
 
 // count is a player count as ServerInfo holds it.
@@ -59,14 +64,17 @@ type SRVTarget struct {
 //	no_dns      - the host name has no record in the requested family
 //	dns_error   - resolving the host name failed
 type PingResult struct {
-	State  string      `json:"state"`
-	IP     string      `json:"ip,omitempty"`
-	RTTms  int64       `json:"rtt_ms,omitempty"`
-	Error  string      `json:"error,omitempty"`
-	SRV    *SRVTarget  `json:"srv,omitempty"`
-	Info   *ServerInfo `json:"info,omitempty"`
-	Cached bool        `json:"cached,omitempty"`
-	AgeS   int         `json:"age_s"`
+	State string `json:"state"`
+	IP    string `json:"ip,omitempty"`
+	RTTms int64  `json:"rtt_ms,omitempty"`
+	Error string `json:"error,omitempty"`
+	// Errors has the error of each scheme tried, by scheme, when none
+	// answered.
+	Errors map[string]string `json:"errors,omitempty"`
+	SRV    *SRVTarget        `json:"srv,omitempty"`
+	Info   *ServerInfo       `json:"info,omitempty"`
+	Cached bool              `json:"cached,omitempty"`
+	AgeS   int               `json:"age_s"`
 }
 
 // target is one address and port to probe, and what a client would send
@@ -80,17 +88,32 @@ type target struct {
 	id string
 }
 
-// edition is one Minecraft edition: how its servers are probed, and which
-// SRV record its clients follow.
-type edition struct {
+// scheme is one way to ask a server for its status.
+type scheme struct {
+	// name is the scheme in answers: info.scheme and the keys of errors.
+	name string
 	// network is "udp" or "tcp"; each probe adds the address family.
 	network string
 	// probe sends one status request to t over network, "udp4" for
-	// instance. It returns the round trip as the edition's client measures
-	// it.
+	// instance. It returns the round trip as the scheme's client measures
+	// it. It ends soon after ctx is cancelled.
 	probe func(ctx context.Context, network string, t target) (*ServerInfo, time.Duration, error)
-	// At srvPort, clients follow the SRV record _<srvService>._<network>
-	// of a name. srvPort is 0 when they follow none.
+}
+
+var (
+	raknet = scheme{name: "raknet", network: "udp", probe: pingBedrock}
+	slp    = scheme{name: "slp", network: "tcp", probe: pingJava}
+)
+
+// edition is one Minecraft edition: how its servers are probed, and which
+// SRV record its clients follow.
+type edition struct {
+	// schemes are raced in this order of preference, see ping. A failed
+	// probe reports the error of the last one, the edition's classic
+	// scheme.
+	schemes []scheme
+	// At srvPort, clients follow the SRV record _<srvService>._tcp of a
+	// name. srvPort is 0 when they follow none.
 	srvService string
 	srvPort    int
 	// connectionIDs is whether clients can send a connection ID.
@@ -99,8 +122,8 @@ type edition struct {
 
 // editions are the editions the API probes, by their name in requests.
 var editions = map[string]edition{
-	"bedrock": {network: "udp", probe: pingBedrock},
-	"java":    {network: "tcp", probe: pingJava, srvService: "minecraft", srvPort: 25565, connectionIDs: true},
+	"bedrock": {schemes: []scheme{raknet}},
+	"java":    {schemes: []scheme{slp}, srvService: "minecraft", srvPort: 25565, connectionIDs: true},
 }
 
 const defaultEdition = "bedrock"
@@ -115,18 +138,119 @@ var editionError = func() string {
 	return "edition must be " + strings.Join(names[:last], ", ") + " or " + names[last]
 }()
 
-// ping runs exactly one probe. The address family is taken from t.ip.
+// The race of an edition's schemes, as in Happy Eyeballs (RFC 8305).
+const (
+	// headStart is how long a scheme runs alone before the next starts.
+	headStart = 250 * time.Millisecond
+	// grace is how long a status from a later scheme waits for the more
+	// preferred schemes that still run.
+	grace = 500 * time.Millisecond
+)
+
+// outcome is how the probe of scheme i ended.
+type outcome struct {
+	i    int
+	info *ServerInfo
+	rtt  time.Duration
+	err  error
+}
+
+// status reports whether o brought a status, more than a weak answer.
+func (o *outcome) status() bool { return o != nil && o.err == nil && !o.info.weak }
+
+// ping probes t with the edition's schemes. The first starts at once, each
+// next one headStart later, or at once when all started ones have ended
+// without a status. The most preferred status wins; a status from a later
+// scheme waits at most grace for the ones before it. A weak answer counts
+// only when no scheme brings a status. The address family is taken from
+// t.ip.
 func ping(ctx context.Context, ed edition, t target) PingResult {
-	network := ed.network + "6"
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	family := "6"
 	if t.ip.To4() != nil {
-		network = ed.network + "4"
+		family = "4"
 	}
-	info, rtt, err := ed.probe(ctx, network, t)
-	if err == nil {
-		info.clip()
-		return PingResult{State: "online", RTTms: rtt.Milliseconds(), Info: info}
+	n := len(ed.schemes)
+	outcomes := make(chan outcome, n)
+	ended := make([]*outcome, n)
+	started := 0
+	start := func() {
+		i, s := started, ed.schemes[started]
+		started++
+		go func() {
+			info, rtt, err := s.probe(ctx, s.network+family, t)
+			outcomes <- outcome{i: i, info: info, rtt: rtt, err: err}
+		}()
 	}
-	return failure(err, t.ip)
+	anyStatus := func() bool { return slices.ContainsFunc(ended, (*outcome).status) }
+	start()
+	next := time.NewTimer(headStart)
+	defer next.Stop()
+	var graceUp <-chan time.Time
+	for {
+		// The most preferred scheme that has not failed decides: its
+		// status wins, and while it runs the others wait for it.
+		first := -1
+		for i := 0; i < started && first < 0; i++ {
+			if ended[i] == nil || ended[i].status() {
+				first = i
+			}
+		}
+		switch {
+		case first >= 0 && ended[first] != nil:
+			return ed.online(ended[first])
+		case first >= 0:
+			if graceUp == nil && anyStatus() {
+				graceUp = time.After(grace)
+			}
+		case started < n:
+			start()
+			next.Reset(headStart)
+			continue
+		default:
+			return ed.settle(ended, t.ip)
+		}
+		select {
+		case o := <-outcomes:
+			ended[o.i] = &o
+		case <-next.C:
+			if started < n && !anyStatus() {
+				start()
+				next.Reset(headStart)
+			}
+		case <-graceUp:
+			return ed.online(ended[slices.IndexFunc(ended, (*outcome).status)])
+		}
+	}
+}
+
+// online is the answer of scheme o.i. A weak answer tells only the scheme.
+func (ed edition) online(o *outcome) PingResult {
+	info := o.info
+	if info.weak {
+		info = &ServerInfo{}
+	}
+	info.Scheme = ed.schemes[o.i].name
+	info.clip()
+	return PingResult{State: "online", RTTms: o.rtt.Milliseconds(), Info: info}
+}
+
+// settle is the result when every scheme ended without a status: the most
+// preferred weak answer, else the failure of the classic scheme, with the
+// error of each scheme.
+func (ed edition) settle(ended []*outcome, ip net.IP) PingResult {
+	for _, o := range ended {
+		if o.err == nil {
+			return ed.online(o)
+		}
+	}
+	res := failure(ended[len(ended)-1].err, ip)
+	res.Errors = make(map[string]string, len(ended))
+	for _, o := range ended {
+		res.Errors[ed.schemes[o.i].name] = failure(o.err, ip).Error
+	}
+	return res
 }
 
 // Longest server text kept. Status pages show a two-line MOTD; the other

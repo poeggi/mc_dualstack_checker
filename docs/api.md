@@ -15,7 +15,7 @@ GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>][&id=<id>]
 GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java[&id=<id>]
 ```
 
-One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. `edition` defaults to `bedrock`.
+One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. `edition` defaults to `bedrock`. `info.scheme` names the scheme that answered.
 
 With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `ip`. An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) answers `400`; give the IPv4 address instead. Without `ip`, the backend resolves `host` and probes its first public address in `family`: `4` for the A record, `6` for AAAA. The two families never fall back to each other.
 
@@ -44,6 +44,7 @@ Names are looked up as absolute names, so the checker host's search domains are 
   "cached": true,
   "age_s": 41,
   "info": {
+    "scheme": "raknet",
     "edition": "MCPE",
     "motd": "My Bedrock Server",
     "version": "1.21.50",
@@ -66,11 +67,14 @@ Names are looked up as absolute names, so the checker host's search domains are 
 | `ip` | the probed address |
 | `rtt_ms` | round trip, `online` only. Java: from Ping to Pong, as the client measures it; the whole exchange when the server does not answer the Ping within 1 s |
 | `error` | short reason, all states but `online` and `no_dns`, see below |
+| `errors` | when no scheme answered: the `error` of each scheme tried, by scheme name |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `srv` | `host` and `port` the name's SRV record sent the probe to, see above |
 | `info` | server data; `gamemode`, `map`, `server_id`, `port4`, `port6` are Bedrock only, `icon` and `contact` are Java only; formatting codes are stripped from `motd`, `map` and `version` |
 
 More `info` fields:
+
+- `scheme`: how the server answered: `raknet` (Bedrock, UDP) or `slp` (Java Server List Ping, TCP).
 
 - `motd_raw`, `map_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.

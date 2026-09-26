@@ -135,7 +135,8 @@ Nothing open blocks the work. What stays unverified:
 
 ## Order of work
 
-All work is local: commits stay on the local main, tests run against local servers. Nothing is pushed before the release go.
+All work is local: commits stay on the local branch `v2-work`, so main stays releasable for fixes in between.
+Tests run against local servers. Nothing is pushed before the release go.
 Each step updates README and `docs/api.md` for what it adds.
 
 1. Java backend: ID, Ping/Pong, parser, no-status reason, `contact`, cache key. Tests, local vanilla servers.

@@ -348,7 +348,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		}
 		lctx, cancel := context.WithTimeout(r.Context(), resolveTimeout)
 		if ed.srvPort != 0 && port == ed.srvPort {
-			if srv = lookupSRV(lctx, ed.srvService, ed.network, host); srv != nil {
+			if srv = lookupSRV(lctx, ed.srvService, "tcp", host); srv != nil {
 				label, port = srv.Host, srv.Port
 			}
 		}

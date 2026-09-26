@@ -42,6 +42,7 @@ CLIENT=198.51.100.1
 check "health"                    json "$B/health" "d['ok'] and 'version' in d and 'ipv6' in d"
 check "usage numbers written at start" "$PY" -c "import json,sys; sys.exit(0 if all(isinstance(json.load(open(sys.argv[1] + '/stats/' + k + '.json'))['periods'], list) for k in ('minutes','hours','days','months')) else 1)" "$STATS"
 check "ping: closed port offline"   json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['state'] == 'offline' and d['error'] and d['ip'] == '127.0.0.1'"
+check "ping: errors per scheme"     json "$B/ping?ip=127.0.0.1&port=9&edition=java" "d['errors'] == {'slp': d['error']}"
 check "ping: invalid ip -> 400"     is "$B/ping?ip=nope&port=1" 400
 check "ping: invalid port -> 400"   is "$B/ping?ip=127.0.0.1&port=0" 400
 check "ping: invalid edition -> 400" is "$B/ping?ip=127.0.0.1&port=1&edition=pocket" 400

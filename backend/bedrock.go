@@ -33,6 +33,7 @@ func pingBedrock(ctx context.Context, network string, t target) (*ServerInfo, ti
 		return nil, 0, err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
 	req := make([]byte, 0, 1+8+16+8)
 	req = append(req, raknetUnconnectedPing)

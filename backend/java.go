@@ -48,6 +48,7 @@ func pingJava(ctx context.Context, network string, t target) (*ServerInfo, time.
 		return nil, 0, err
 	}
 	defer conn.Close()
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
 	deadline := time.Now().Add(javaIOTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
