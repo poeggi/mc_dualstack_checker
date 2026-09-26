@@ -24,7 +24,8 @@ Target: released before Bedrock 26.60 (2026-10-27).
   - A complete answer from the preferred transport wins, even if a later transport answered first.
   - When a later transport answers while the preferred one is still pending, the result waits for the preferred one at most 500 ms.
   - A weak answer (D3) loses to any complete one and waits for one at most 500 ms. Alone, it still means online.
-- Cost for a RakNet-only server: at most 250 ms. Cost on total failure: unchanged, at most 4 s.
+- Cost for a RakNet-only server: none when its TCP port refuses, at most 750 ms (head start plus grace) when a firewall
+  drops TCP silently. Cost on total failure: unchanged, at most 4 s.
 - The probe budget (`pingTimeout`, 6 s), the in-flight slots and the limits do not change.
 
 ### D2. The NetherNet probe (`backend/nethernet.go`)
