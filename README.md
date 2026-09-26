@@ -1,8 +1,8 @@
 # Minecraft Dualstack Checker
 
 Checks a Minecraft server over IPv4 and IPv6 separately, from a dual-stack host.
-Supports Bedrock (NetherNet status over TCP and RakNet ping over UDP, raced) and Java (Server List Ping, TCP, with connection IDs).
-A backend on a dual-stack VM does the probing.
+Supports Bedrock (NetherNet status over TCP and RakNet ping over UDP, raced) and Java (Server List Ping, TCP, with and without connection IDs).
+A backend on a dual-stack VM does the probing. Both the frontend and the backend can be reached via either, IPv4 or IPv6.
 
 ![Icon](frontend/favicon.svg) Live Website: 
 https://www.poggensee.it/mc_dualstack_check/
