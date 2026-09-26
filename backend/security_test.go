@@ -49,21 +49,38 @@ func checkInfo(t *testing.T, info *ServerInfo) {
 	v := reflect.ValueOf(*info)
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Type().Field(i)
-		if f.Type.Kind() != reflect.String || !f.IsExported() {
+		if !f.IsExported() {
 			continue
 		}
-		s := v.Field(i).String()
 		limit := rawMax
 		if f.Name == "Icon" {
 			limit = iconMax
 		}
-		if len(s) > limit || !utf8.ValidString(s) {
-			t.Fatalf("%s: %d bytes or invalid UTF-8: %q", f.Name, len(s), s)
-		}
-		for _, r := range s {
-			if r != '\n' && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r)) {
-				t.Fatalf("%s holds %U: %q", f.Name, r, s)
+		switch f.Type.Kind() {
+		case reflect.String:
+			checkText(t, f.Name, v.Field(i).String(), limit)
+		case reflect.Slice:
+			if f.Type.Elem().Kind() != reflect.String {
+				continue
 			}
+			if v.Field(i).Len() > sampleMax {
+				t.Fatalf("%s: %d entries", f.Name, v.Field(i).Len())
+			}
+			for j := 0; j < v.Field(i).Len(); j++ {
+				checkText(t, f.Name, v.Field(i).Index(j).String(), limit)
+			}
+		}
+	}
+}
+
+func checkText(t *testing.T, name, s string, limit int) {
+	t.Helper()
+	if len(s) > limit || !utf8.ValidString(s) {
+		t.Fatalf("%s: %d bytes or invalid UTF-8: %q", name, len(s), s)
+	}
+	for _, r := range s {
+		if r != '\n' && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r)) {
+			t.Fatalf("%s holds %U: %q", name, r, s)
 		}
 	}
 }
@@ -89,6 +106,7 @@ func FuzzParseJavaStatus(f *testing.F) {
 	f.Add([]byte(fakeStatus))
 	f.Add([]byte(`{"description":[{"text":"a","color":"#12ab34","extra":[["b",{"translate":"k","fallback":"c"}]]}],"version":{"name":7}}`))
 	f.Add([]byte(`{"description":{"text":"\u202eevil\u0000"},"contact":"\ud800","favicon":"data:image/png;base64,===="}`))
+	f.Add([]byte(`{"version":{"name":"x"},"players":{"sample":[{"name":"\u0007a"},{"name":7},"b",{"name":"` + strings.Repeat("n", 100) + `"}]},"enforcesSecureChat":"yes"}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		info, _ := parseJavaStatus(raw)
 		checkInfo(t, info)

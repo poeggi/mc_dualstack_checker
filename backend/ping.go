@@ -41,8 +41,12 @@ type ServerInfo struct {
 	Icon          string `json:"icon,omitempty"`
 	// Contact is how to reach the operators, as a Java server sends it.
 	Contact string `json:"contact,omitempty"`
-	Port4   int    `json:"port4,omitempty"`
-	Port6   int    `json:"port6,omitempty"`
+	// PlayerSample is the names a Java server lists as online, at most
+	// sampleMax. EnforcesSecureChat is its chat signing rule, when it says.
+	PlayerSample       []string `json:"player_sample,omitempty"`
+	EnforcesSecureChat *bool    `json:"enforces_secure_chat,omitempty"`
+	Port4              int      `json:"port4,omitempty"`
+	Port6              int      `json:"port6,omitempty"`
 	// weak marks an answer without a status: the server is there but
 	// tells nothing about itself.
 	weak bool

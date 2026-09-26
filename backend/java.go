@@ -37,6 +37,8 @@ const (
 	// Largest server icon passed on, as a data URL. Most 64x64 icons need
 	// far less; the limit keeps cached results small.
 	iconMax = 16 << 10
+	// Vanilla lists at most 12 online players in its status.
+	sampleMax = 12
 )
 
 // pingJava performs a Server List Ping over the given network ("tcp4" or
@@ -185,13 +187,16 @@ func formEscape(s string) string {
 // one of an unexpected type is left out instead of failing the status.
 func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 	var st struct {
-		Version, Players, Description, Favicon, Contact json.RawMessage
+		Version, Players, Description, Favicon, Contact, EnforcesSecureChat json.RawMessage
 	}
 	if json.Unmarshal(raw, &st) != nil {
 		return nil, probeError("malformed status")
 	}
 	var version struct{ Name, Protocol json.RawMessage }
-	var players struct{ Online, Max json.RawMessage }
+	var players struct {
+		Online, Max json.RawMessage
+		Sample      []struct{ Name json.RawMessage }
+	}
 	_ = json.Unmarshal(st.Version, &version)
 	_ = json.Unmarshal(st.Players, &players)
 
@@ -212,6 +217,15 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 	}
 	if n, ok := jsonInt(players.Max); ok {
 		info.PlayersMax = count(n)
+	}
+	for _, p := range players.Sample {
+		if name := jsonString(p.Name).plain(fieldMax); name != "" && len(info.PlayerSample) < sampleMax {
+			info.PlayerSample = append(info.PlayerSample, name)
+		}
+	}
+	var enforces bool
+	if json.Unmarshal(st.EnforcesSecureChat, &enforces) == nil {
+		info.EnforcesSecureChat = &enforces
 	}
 	if info.Version == "" && info.MOTD == "" {
 		return nil, probeError("empty status")

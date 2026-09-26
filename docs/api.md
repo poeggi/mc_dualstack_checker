@@ -75,7 +75,7 @@ Names are looked up as absolute names, so the checker host's search domains are 
 | `errors` | when no transport answered: the `error` of each transport tried, by transport name |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `srv` | `host` and `port` the name's SRV record sent the probe to, see above |
-| `info` | server data; `server_name`, `level` and `game_mode` are Bedrock only, `edition`, `server_id`, `port4` and `port6` RakNet only, `motd`, `icon` and `contact` Java only; formatting codes are stripped from `motd`, `server_name`, `level` and `version` |
+| `info` | server data; `server_name`, `level` and `game_mode` are Bedrock only, `edition`, `server_id`, `port4` and `port6` RakNet only, `motd`, `icon`, `contact`, `player_sample` and `enforces_secure_chat` Java only; formatting codes are stripped from `motd`, `server_name`, `level` and `version` |
 
 More `info` fields:
 
@@ -86,6 +86,8 @@ More `info` fields:
 - `motd_raw`, `server_name_raw`, `level_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
 - `contact`: how to reach the operators, as a Java server sends it (`status-contact-details`, Java 26.4 on).
+- `player_sample`: the names a Java server lists as online, at most 12, formatting codes stripped. Left out when it lists none; servers with `hide-online-players` send none, and some send text lines instead of names.
+- `enforces_secure_chat`: whether a Java server enforces signed chat (`enforce-secure-profile`). Left out when the server does not say.
 - `players_online`, `players_max`: left out when the server sends no counts.
 - `motd`: a Java description may be a string, a text component or an array of them. A `translate` component shows its `fallback`. Components without text, such as `object`, show nothing. Fields of an unexpected type are left out.
 - `protocol`: for Java, `-1` when the server accepts several game versions. The probe asks with protocol -1, and such servers, proxies mostly, answer with the number they are asked with.
@@ -106,6 +108,10 @@ States:
 - `unreachable`: `rejected (no route to host)`, `rejected (host unknown)`, `rejected (prohibited)` or `rejected (network unreachable)`.
 - `no_route`: `network unreachable`, `no source address` or `family not supported`.
 - `dns_error`: `timeout` or `error`.
+
+## Changes in 2.0.2
+
+- New `info` fields for Java: `player_sample` and `enforces_secure_chat`.
 
 ## Changes in 2.0
 

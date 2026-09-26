@@ -231,6 +231,29 @@ func TestParseJavaStatus(t *testing.T) {
 	}
 }
 
+// The player sample keeps at most sampleMax cleaned names; the secure chat
+// rule is passed on only as a boolean.
+func TestParseJavaStatusSample(t *testing.T) {
+	sample := `{"name":"` + string(rune(0xa7)) + `cAlice","id":"1"},{"name":"  "},"bob",{"name":7},{"name":"Carol\u0000"}`
+	for i := 0; i < sampleMax; i++ {
+		sample += `,{"name":"p` + strconv.Itoa(i) + `"}`
+	}
+	info, err := parseJavaStatus([]byte(`{"version":{"name":"v"},"players":{"online":1,"max":2,"sample":[` + sample + `]},"enforcesSecureChat":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(info.PlayerSample, ","); len(info.PlayerSample) != sampleMax || !strings.HasPrefix(got, "Alice,Carol,p0,") {
+		t.Errorf("sample %q", info.PlayerSample)
+	}
+	if info.EnforcesSecureChat == nil || !*info.EnforcesSecureChat {
+		t.Errorf("secure chat %v, want true", info.EnforcesSecureChat)
+	}
+	info, _ = parseJavaStatus([]byte(`{"version":{"name":"v"},"players":{"sample":"none"},"enforcesSecureChat":"yes"}`))
+	if info.PlayerSample != nil || info.EnforcesSecureChat != nil {
+		t.Errorf("sample %v, secure chat %v, want none", info.PlayerSample, info.EnforcesSecureChat)
+	}
+}
+
 func TestFormEscape(t *testing.T) {
 	for in, want := range map[string]string{
 		"team a&b":       "team+a%26b",

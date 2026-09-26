@@ -654,7 +654,9 @@ function ipCard(r, label) {
             ["Transport", TRANSPORTS[info.transport], info.transport === "nethernet" ? NETHERNET_HINT : ""],
             ["Level", info.level && (info.level_raw ? mcText(info.level_raw, true) : info.level)], ["Game Mode", info.game_mode],
             ["Protocol", info.protocol === "-1" ? "-1 (any)" : info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
-            ["Server ID", info.server_id], ["Contact", info.contact]
+            ["Server ID", info.server_id], ["Online", info.player_sample && info.player_sample.join(", ")],
+            ["Secure Chat", info.enforces_secure_chat === undefined ? "" : info.enforces_secure_chat ? "enforced" : "not enforced"],
+            ["Contact", info.contact]
         ].filter(function (kv) { return kv[1]; });
         if (extra.length) {
             var id = "card-extra-" + (++cardCounter);
