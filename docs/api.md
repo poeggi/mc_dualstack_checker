@@ -125,11 +125,11 @@ Probe results are cached for 60 seconds per `edition`, address and `port`, onlin
 
 Per client address: an IPv4 address, or the /64 of an IPv6 address. Callers are charged for their own address, so visitors of the web interface for theirs.
 
-- **Distinct systems.** More than 4 different systems within 60 seconds start a 60 second cooldown. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once.
-- **Health.** More than 4 `/health` requests within 7 seconds start the same cooldown.
+- **Distinct systems.** At most 8 different systems within a sliding 60 second window. A system is the `host` given, or the literal address. Both families and all port fallbacks of one check count once. A system stays in the window for 60 seconds after its latest check. A 9th system blocks the client until the oldest one leaves the window, but at least 7 seconds.
+- **Health.** More than 4 `/health` requests within 7 seconds start a 60 second cooldown.
 - **Request budget.** 16 requests; 4 come back together every 7 seconds. Over it: `429` with `Retry-After` naming the seconds until the next 4 arrive.
 
-During a cooldown every valid request answers `429` with `Retry-After`.
+While a client is blocked, every valid request answers `429` with `Retry-After`. The JSON `error` names the limit.
 
 Global: at most 128 probes and name lookups in flight. Above that the backend answers `503` with `Retry-After: 5` instead of queueing.
 

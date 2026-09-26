@@ -91,11 +91,11 @@ for i in 1 2 3; do status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null;
 check "budget: 4 tokens after 7 s"  is "$B/ping?ip=127.0.0.1&port=9&edition=java" 200
 check "budget: 5th before the next batch -> 429" is "$B/ping?ip=127.0.0.1&port=9&edition=java" 429
 CLIENT=203.0.113.7
-for i in 1 2 3 4; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
-check "4 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200
-check "5th system -> 429"           is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys5.example" 429
+for i in 1 2 3 4 5 6 7 8; do status "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys$i.example" >/dev/null; done
+check "8 systems allowed, same system again ok" is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys1.example" 200
+check "9th system -> 429"           is "$B/ping?ip=127.0.0.1&port=9&edition=java&host=sys9.example" 429
 check "429 names the systems limit" json "$B/health" "'systems' in d['error']"
-check "cooldown carries Retry-After" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | grep -qi '^Retry-After: '"
+check "block lasts until the oldest system leaves" sh -c "curl -s -D - -o /dev/null -H 'X-Forwarded-For: $CLIENT' '$B/health' | tr -d '\r' | grep -qiE '^Retry-After: (5[0-9]|60|61)\$'"
 CLIENT=203.0.113.8
 for i in 1 2 3; do status "$B/health" >/dev/null; done
 check "4 health requests within 7 s ok" is "$B/health" 200

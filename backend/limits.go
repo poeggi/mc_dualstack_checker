@@ -3,10 +3,10 @@
 package main
 
 // Protection for the endpoints: a 60 s result cache that coalesces
-// identical probes, a per-client cooldown after too many distinct systems
-// or health requests, a per-client request budget, a global cap on
-// in-flight probes and name lookups, and a filter that keeps probes off
-// internal networks.
+// identical probes, a per-client sliding window of distinct systems, a
+// per-client cooldown after too many health requests, a per-client request
+// budget, a global cap on in-flight probes and name lookups, and a filter
+// that keeps probes off internal networks.
 
 import (
 	"context"
@@ -20,7 +20,7 @@ const (
 	cacheTTL      = 60 * time.Second
 	cacheMax      = 10000
 	systemsWindow = 60 * time.Second
-	systemsMax    = 4
+	systemsMax    = 8
 	cooldown      = 60 * time.Second
 	rlBurst       = 16
 	rlBatch       = 4 // tokens that arrive together
@@ -129,25 +129,30 @@ var limits = &limiter{clients: map[string]*client{}}
 const overflowClient = "overflow"
 
 // admitProbe charges one probe request to ip and records the target system.
+// A system new to a full window blocks the client until the oldest system
+// leaves the window, but at least rlBatchEvery.
 func (l *limiter) admitProbe(ip, system string) (wait int, reason string) {
-	return l.admit(ip, func(c *client, now time.Time) string {
+	return l.admit(ip, func(c *client, now time.Time) (string, time.Duration) {
+		oldest := now
 		for s, t := range c.systems {
 			if now.Sub(t) > systemsWindow {
 				delete(c.systems, s)
+			} else if t.Before(oldest) {
+				oldest = t
 			}
 		}
 		if _, seen := c.systems[system]; !seen && len(c.systems) >= systemsMax {
-			return "systems"
+			return "systems", max(oldest.Add(systemsWindow).Sub(now), rlBatchEvery)
 		}
 		c.systems[system] = now
-		return ""
+		return "", 0
 	})
 }
 
 // admitHealth charges one health request to ip. More than healthMax
 // within healthInterval start the cooldown.
 func (l *limiter) admitHealth(ip string) (wait int, reason string) {
-	return l.admit(ip, func(c *client, now time.Time) string {
+	return l.admit(ip, func(c *client, now time.Time) (string, time.Duration) {
 		recent := c.health[:0]
 		for _, t := range c.health {
 			if now.Sub(t) < healthInterval {
@@ -156,16 +161,17 @@ func (l *limiter) admitHealth(ip string) (wait int, reason string) {
 		}
 		c.health = append(recent, now)
 		if len(c.health) > healthMax {
-			return "health"
+			return "health", cooldown
 		}
-		return ""
+		return "", 0
 	})
 }
 
-// admit applies the cooldown and the request budget, then check, which
-// names the limit a request breaks or returns "". It returns the seconds
-// to wait and the limit hit when the client is over one.
-func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) (wait int, reason string) {
+// admit applies a running block and the request budget, then check, which
+// names the limit a request breaks and how long that blocks the client, or
+// returns "". It returns the seconds to wait and the limit hit when the
+// client is over one.
+func (l *limiter) admit(ip string, check func(c *client, now time.Time) (string, time.Duration)) (wait int, reason string) {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -199,8 +205,8 @@ func (l *limiter) admit(ip string, check func(c *client, now time.Time) string) 
 	}
 	c.tokens--
 
-	if cause := check(c, now); cause != "" {
-		c.blocked, c.cause = now.Add(cooldown), cause
+	if cause, block := check(c, now); cause != "" {
+		c.blocked, c.cause = now.Add(block), cause
 		return secondsUntil(c.blocked, now), cause
 	}
 	return 0, ""

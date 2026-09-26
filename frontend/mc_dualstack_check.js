@@ -177,7 +177,7 @@ function fillForm(q) {
 // -- API ---------------------------------------------------------
 // Probes go straight to the backend at apiBase. An answer that takes
 // longer than PROBE_TIMEOUT_MS counts as unreachable. Errors are thrown as
-// { rateLimited, retry } | { unreachable } | { message }.
+// { rateLimited, retry, message } | { unreachable } | { message }.
 function api(endpoint, params) {
     var q = new URLSearchParams(params || {}).toString();
     var ctrl = new AbortController();
@@ -186,7 +186,7 @@ function api(endpoint, params) {
         function (res) {
             return res.json().catch(function () { return {}; }).then(function (body) {
                 clearTimeout(timer);
-                if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10 };
+                if (res.status === 429) throw { rateLimited: true, retry: parseInt(res.headers.get("Retry-After"), 10) || 10, message: body.error };
                 if (!res.ok) throw { message: body.error || ("Request failed (" + res.status + ")") };
                 return body;
             });
@@ -406,7 +406,7 @@ function runCheck(q) {
         setBusy(false);
         render({ queried_at: startedAt, ipv4: both[0], ipv6: both[1], log: log.concat(log4, log6) });
     }).catch(function (err) {
-        if (err && err.rateLimited) { startRetryCountdown(err.retry); return; }
+        if (err && err.rateLimited) { startRetryCountdown(err.retry, err.message); return; }
         setBusy(false);
         if (err && err.unreachable) {
             // The web host's view of the API tells the two cases apart.
@@ -419,7 +419,8 @@ function runCheck(q) {
     });
 }
 
-function startRetryCountdown(secs) {
+// reason is the limit the backend names, if it names one.
+function startRetryCountdown(secs, reason) {
     var label = $("checking-indicator").querySelector(".checking-label");
     var tick = function () {
         if (secs <= 0) {
@@ -429,7 +430,7 @@ function startRetryCountdown(secs) {
             showNotice("OK - ready to try again.", "ok");
             return;
         }
-        showNotice("Too many requests, slow down!");
+        showNotice((reason || "Too many requests, slow down") + "!");
         label.textContent = "Wait " + secs + "s\u2026";
         secs--;
     };

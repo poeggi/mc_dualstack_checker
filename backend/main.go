@@ -368,7 +368,7 @@ func busy(w http.ResponseWriter) {
 }
 
 var limitMessages = map[string]string{
-	"systems": fmt.Sprintf("More than %d systems within %d seconds, cooling down", systemsMax, int(systemsWindow.Seconds())),
+	"systems": fmt.Sprintf("More than %d systems within %d seconds", systemsMax, int(systemsWindow.Seconds())),
 	"health":  fmt.Sprintf("More than %d health requests within %d seconds, cooling down", healthMax, int(healthInterval.Seconds())),
 	"rate":    "Too many requests, slow down",
 }
