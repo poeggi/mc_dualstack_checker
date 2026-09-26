@@ -11,8 +11,8 @@ All answers of `/ping` and `/health` are JSON with `Cache-Control: no-store`. Er
 ## `GET /ping`
 
 ```
-GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>]
-GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java
+GET /ping?ip=<addr>&port=<n>&edition=bedrock|java[&host=<name>][&id=<id>]
+GET /ping?host=<name>&family=4|6&port=<n>&edition=bedrock|java[&id=<id>]
 ```
 
 One probe against one address and port: RakNet unconnected ping (UDP) for Bedrock, Server List Ping (TCP) for Java. `edition` defaults to `bedrock`.
@@ -21,7 +21,9 @@ With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `
 
 `host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
-Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails or takes longer than 2 s, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
+Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. Clients send the target at login. Their status ping sends it from Java 26.4 on; older clients send the typed name there. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails or takes longer than 2 s, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
+
+`id` is a Java connection ID. Java servers from 26.4 on can answer only clients that send one of their `allowed-connection-ids`. Players type it as `<id>@<host>`. The handshake then carries `<host>?_id=<id>`, encoded as the client does it. Name lookups and SRV use the name without the ID. The ID has 1 to 64 printable ASCII characters, no comma and no space at either end: servers split their list at commas and trim the entries. Other IDs, and `id` with another edition, answer `400`.
 
 `host` must be a DNS name of letters, digits, hyphens and underscores, labels of at most 63 characters, 253 in total; a trailing dot is allowed. Otherwise the request answers `400`, or with `ip` the name is ignored.
 
@@ -62,16 +64,19 @@ Names are looked up as absolute names, so the checker host's search domains are 
 |---|---|
 | `state` | `online`, `offline`, `unreachable`, `no_route`, `no_dns` or `dns_error`, see below |
 | `ip` | the probed address |
-| `rtt_ms` | round trip of the probe, `online` only |
+| `rtt_ms` | round trip, `online` only. Java: from Ping to Pong, as the client measures it; the whole exchange when the server does not answer the Ping within 1 s |
 | `error` | short reason, all states but `online` and `no_dns`, see below |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
 | `srv` | `host` and `port` the name's SRV record sent the probe to, see above |
-| `info` | server data; `gamemode`, `map`, `server_id`, `port4`, `port6` are Bedrock only, `icon` is Java only; formatting codes are stripped from `motd` and `map` |
+| `info` | server data; `gamemode`, `map`, `server_id`, `port4`, `port6` are Bedrock only, `icon` and `contact` are Java only; formatting codes are stripped from `motd`, `map` and `version` |
 
 More `info` fields:
 
 - `motd_raw`, `map_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
+- `contact`: how to reach the operators, as a Java server sends it (`status-contact-details`, Java 26.4 on).
+- `players_online`, `players_max`: left out when the server sends no counts.
+- `motd`: a Java description may be a string, a text component or an array of them. A `translate` component shows its `fallback`. Components without text, such as `object`, show nothing. Fields of an unexpected type are left out.
 - `protocol`: for Java, `-1` when the server accepts several game versions. The probe asks with protocol -1, and such servers, proxies mostly, answer with the number they are asked with.
 - `port4`, `port6`: the ports a Bedrock server announces. They are its own settings, meant for LAN discovery. Behind port forwarding they differ from the probed port.
 
@@ -86,7 +91,7 @@ States:
 
 `error` per state:
 
-- `offline`: `no response (timeout)`, `refused (port closed)`, `refused (reset)`, `refused (closed)`, `invalid data (<detail>)` such as `invalid data (bad raknet magic)`, or `failed (unknown error)`.
+- `offline`: `no response (timeout)`, `refused (port closed)`, `refused (reset)`, `refused (closed)`, `invalid data (<detail>)` such as `invalid data (bad raknet magic)`, or `failed (unknown error)`. For Java also `connected, no status (status disabled or connection ID required)`, and `connected, no status (status disabled or wrong connection ID)` when `id` was given: the server accepted the connection and closed it without a status. Vanilla servers do that when their status is off or the ID does not match.
 - `unreachable`: `rejected (no route to host)`, `rejected (host unknown)`, `rejected (prohibited)` or `rejected (network unreachable)`.
 - `no_route`: `network unreachable`, `no source address` or `family not supported`.
 - `dns_error`: `timeout` or `error`.
@@ -119,7 +124,7 @@ Both numbers are split two ways, and each split adds up to the total. `ipv4` and
 
 ## Caching
 
-Probe results are cached for 60 seconds per `edition`, address and `port`, online and offline alike. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
+Probe results are cached for 60 seconds per `edition`, address, `port`, `host` and `id`, online and offline alike. Proxies answer per name, and servers with connection IDs answer only the right ID, so a result is never shared across names or IDs. Concurrent identical probes are coalesced into one. Cached answers carry `cached: true`; `age_s` is always present, 0 for a fresh probe.
 
 ## Limits
 

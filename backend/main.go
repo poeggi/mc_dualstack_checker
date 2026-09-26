@@ -7,6 +7,7 @@
 //
 //	GET /ping?ip=<addr>&port=<n>&edition=bedrock|java     -> one probe, cached 60 s
 //	GET /ping?host=<name>&family=4|6&port=<n>&edition=... -> the same, resolved here
+//	    &id=<connection id>                               -> Java only
 //	GET /health
 //
 // Listens on loopback only; Caddy in front is the public side.
@@ -40,6 +41,7 @@ const (
 	srvWait        = srvTimeout + 500*time.Millisecond
 	pingTimeout    = 6 * time.Second
 	maxHostLen     = 253
+	maxIDLen       = 64
 	healthInterval = 7 * time.Second
 )
 
@@ -130,6 +132,21 @@ func hostName(host string) string {
 		}
 	}
 	return name
+}
+
+// connectionID reports whether id can match an entry of a server's
+// allowed-connection-ids. The server splits that list at commas and trims
+// the entries.
+func connectionID(id string) bool {
+	if id == "" || len(id) > maxIDLen || id[0] == ' ' || id[len(id)-1] == ' ' {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < ' ' || id[i] > '~' || id[i] == ',' {
+			return false
+		}
+	}
+	return true
 }
 
 // localDomains only resolve inside private networks: reserved and
@@ -268,6 +285,15 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "port must be between 1 and 65535")
 		return
 	}
+	id := q.Get("id")
+	switch {
+	case id != "" && !ed.connectionIDs:
+		httpError(w, http.StatusBadRequest, "id is for java only")
+		return
+	case id != "" && !connectionID(id):
+		httpError(w, http.StatusBadRequest, "id must be 1 to "+strconv.Itoa(maxIDLen)+" printable ASCII characters, no comma, no space at either end")
+		return
+	}
 	// With ip, an invalid host is dropped; without, it is an error.
 	host := hostName(strings.TrimSpace(q.Get("host")))
 	var ip net.IP
@@ -343,13 +369,15 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	// when this client goes away.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), pingTimeout)
 	defer cancel()
-	key := edName + "|" + ip.String() + "|" + strconv.Itoa(port)
+	// Proxies answer per name, and a server with connection IDs answers
+	// only the right one: a result is shared only with the same name and ID.
+	key := strings.Join([]string{edName, ip.String(), strconv.Itoa(port), label, id}, "|")
 	res := cache.get(ctx, key, func() (PingResult, bool) {
 		if !acquireSlot() {
 			return PingResult{State: "busy"}, false
 		}
 		defer releaseSlot()
-		return ping(ctx, ed, ip, port, label), true
+		return ping(ctx, ed, target{ip: ip, port: port, host: label, id: id}), true
 	})
 	cached = res.Cached
 	if res.State == "busy" {

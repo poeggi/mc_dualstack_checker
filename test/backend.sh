@@ -50,6 +50,16 @@ check "unknown endpoint -> 404"     is "$B/nope" 404
 check "unknown endpoint: JSON error" json "$B/nope" "d['error']"
 check "POST -> 405 with JSON"       sh -c "curl -s -X POST -w '%{http_code}' '$B/ping' | tr -d '\n' | grep -q '\"error\".*405\$'"
 
+echo "== connection IDs"
+CLIENT=198.51.100.5
+check "id with bedrock -> 400"      is "$B/ping?ip=127.0.0.1&port=9&edition=bedrock&id=x" 400
+check "id with a comma -> 400"      is "$B/ping?ip=127.0.0.1&port=9&edition=java&id=a,b" 400
+check "id of 65 characters -> 400"  is "$B/ping?ip=127.0.0.1&port=9&edition=java&id=$(printf '%065d' 0)" 400
+check "id with a space inside ok"   json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=team%20a" "d['state'] == 'offline'"
+status "$B/ping?ip=127.0.0.1&port=9&edition=java" >/dev/null
+check "cache keeps IDs apart"       json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "not d.get('cached')"
+check "same ID is cached"           json "$B/ping?ip=127.0.0.1&port=9&edition=java&id=other" "d.get('cached')"
+
 echo "== name lookups (localtest.me is public DNS for 127.0.0.1)"
 CLIENT=198.51.100.2
 check "name resolved by the backend" json "$B/ping?host=localtest.me&family=4&port=9&edition=java" "d['ip'] == '127.0.0.1' and d['state'] == 'offline'"

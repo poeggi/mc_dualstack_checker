@@ -24,11 +24,13 @@ const (
 
 // pingBedrock sends a RakNet unconnected ping over the given network
 // ("udp4" or "udp6") and parses the pong string. The ping carries no name.
-func pingBedrock(ctx context.Context, network, ip string, port int, _ string) (*ServerInfo, error) {
-	addr := net.JoinHostPort(ip, strconv.Itoa(port))
+// The round trip includes a lost first attempt.
+func pingBedrock(ctx context.Context, network string, t target) (*ServerInfo, time.Duration, error) {
+	start := time.Now()
+	addr := net.JoinHostPort(t.ip.String(), strconv.Itoa(t.port))
 	conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer conn.Close()
 
@@ -42,10 +44,10 @@ func pingBedrock(ctx context.Context, network, ip string, port int, _ string) (*
 	var lastErr error
 	for attempt := 0; attempt < bedrockAttempts; attempt++ {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		}
 		if _, err := conn.Write(req); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		deadline := time.Now().Add(bedrockReplyTimeout)
 		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
@@ -62,9 +64,9 @@ func pingBedrock(ctx context.Context, network, ip string, port int, _ string) (*
 			lastErr = perr
 			continue
 		}
-		return info, nil
+		return info, time.Since(start), nil
 	}
-	return nil, lastErr
+	return nil, 0, lastErr
 }
 
 // parsePong decodes an unconnected pong:
@@ -102,8 +104,9 @@ func parsePong(b []byte) (*ServerInfo, error) {
 		MapRaw:   formatted(get(7)),
 		Gamemode: get(8),
 	}
-	info.PlayersOnline, _ = strconv.Atoi(get(4))
-	info.PlayersMax, _ = strconv.Atoi(get(5))
+	online, _ := strconv.Atoi(get(4))
+	slots, _ := strconv.Atoi(get(5))
+	info.PlayersOnline, info.PlayersMax = count(online), count(slots)
 	// The ports the server is configured for, as it announces them for LAN
 	// discovery. Behind port forwarding they differ from the probed port.
 	info.Port4 = announcedPort(get(10))

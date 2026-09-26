@@ -36,6 +36,7 @@ func TestFailure(t *testing.T) {
 		{"closed", "offline", "refused (closed)", io.ErrUnexpectedEOF},
 		{"timeout", "offline", "no response (timeout)", context.DeadlineExceeded},
 		{"invalid reply", "offline", "invalid data (bad raknet magic)", probeError("bad raknet magic")},
+		{"no status", "offline", "connected, no status (status disabled)", noStatus("status disabled")},
 		{"other", "offline", "failed (unknown error)", errors.New("x")},
 		{"host unreachable", "unreachable", "rejected (no route to host)", dial(syscall.EHOSTUNREACH)},
 		{"administratively prohibited", "unreachable", "rejected (prohibited)", dial(syscall.EACCES)},
@@ -49,13 +50,13 @@ func TestFailure(t *testing.T) {
 	}
 }
 
-func TestFlattenChatDepth(t *testing.T) {
+func TestChatDepth(t *testing.T) {
 	raw := `"x"`
 	for i := 0; i < 1000; i++ {
 		raw = `{"text":"a","extra":[` + raw + `]}`
 	}
-	if got := flattenChat(json.RawMessage(raw), 0); got != strings.Repeat("a", maxChatDepth+1) {
-		t.Errorf("flattenChat kept %d levels, want %d", len(got), maxChatDepth+1)
+	if got := parseChat(json.RawMessage(raw), 0).visible(); got != strings.Repeat("a", maxChatDepth+1) {
+		t.Errorf("parseChat kept %d levels, want %d", len(got), maxChatDepth+1)
 	}
 }
 
@@ -80,7 +81,7 @@ func TestLegacyChat(t *testing.T) {
 	} {
 		raw := strings.ReplaceAll(c.raw, s, "\u00a7")
 		want := strings.ReplaceAll(c.want, s, "\u00a7")
-		if got := legacyChat(json.RawMessage(raw), 0, chatStyle{}); got != want {
+		if got := parseChat(json.RawMessage(raw), 0).legacy(); got != want {
 			t.Errorf("%s: %q, want %q", c.name, got, want)
 		}
 	}

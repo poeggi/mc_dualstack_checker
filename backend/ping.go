@@ -15,14 +15,15 @@ import (
 	"time"
 )
 
-// ServerInfo is what a successful ping yields, independent of edition.
+// ServerInfo is what a successful ping yields, independent of edition. The
+// player counts are left out when the server sends none.
 type ServerInfo struct {
 	Edition       string `json:"edition,omitempty"`
 	MOTD          string `json:"motd,omitempty"`
 	Version       string `json:"version,omitempty"`
 	Protocol      string `json:"protocol,omitempty"`
-	PlayersOnline int    `json:"players_online"`
-	PlayersMax    int    `json:"players_max"`
+	PlayersOnline *int   `json:"players_online,omitempty"`
+	PlayersMax    *int   `json:"players_max,omitempty"`
 	Gamemode      string `json:"gamemode,omitempty"`
 	Map           string `json:"map,omitempty"`
 	ServerID      string `json:"server_id,omitempty"`
@@ -31,9 +32,14 @@ type ServerInfo struct {
 	MOTDRaw string `json:"motd_raw,omitempty"`
 	MapRaw  string `json:"map_raw,omitempty"`
 	Icon    string `json:"icon,omitempty"`
+	// Contact is how to reach the operators, as a Java server sends it.
+	Contact string `json:"contact,omitempty"`
 	Port4   int    `json:"port4,omitempty"`
 	Port6   int    `json:"port6,omitempty"`
 }
+
+// count is a player count as ServerInfo holds it.
+func count(n int) *int { return &n }
 
 // SRVTarget is where a Java SRV record sends clients.
 type SRVTarget struct {
@@ -63,25 +69,38 @@ type PingResult struct {
 	AgeS   int         `json:"age_s"`
 }
 
+// target is one address and port to probe, and what a client would send
+// along. Editions that send no name or ID ignore them.
+type target struct {
+	ip   net.IP
+	port int
+	// host is the name a client would send, "" for a literal address.
+	host string
+	// id is the connection ID a client would send, "" for none.
+	id string
+}
+
 // edition is one Minecraft edition: how its servers are probed, and which
 // SRV record its clients follow.
 type edition struct {
 	// network is "udp" or "tcp"; each probe adds the address family.
 	network string
-	// probe sends one status request to ip and port over network, "udp4"
-	// for instance. host is the name a client would send, "" for a literal
-	// address; editions that do not send one ignore it.
-	probe func(ctx context.Context, network, ip string, port int, host string) (*ServerInfo, error)
+	// probe sends one status request to t over network, "udp4" for
+	// instance. It returns the round trip as the edition's client measures
+	// it.
+	probe func(ctx context.Context, network string, t target) (*ServerInfo, time.Duration, error)
 	// At srvPort, clients follow the SRV record _<srvService>._<network>
 	// of a name. srvPort is 0 when they follow none.
 	srvService string
 	srvPort    int
+	// connectionIDs is whether clients can send a connection ID.
+	connectionIDs bool
 }
 
 // editions are the editions the API probes, by their name in requests.
 var editions = map[string]edition{
 	"bedrock": {network: "udp", probe: pingBedrock},
-	"java":    {network: "tcp", probe: pingJava, srvService: "minecraft", srvPort: 25565},
+	"java":    {network: "tcp", probe: pingJava, srvService: "minecraft", srvPort: 25565, connectionIDs: true},
 }
 
 const defaultEdition = "bedrock"
@@ -96,19 +115,18 @@ var editionError = func() string {
 	return "edition must be " + strings.Join(names[:last], ", ") + " or " + names[last]
 }()
 
-// ping runs exactly one probe. The address family is taken from ip.
-func ping(ctx context.Context, ed edition, ip net.IP, port int, host string) PingResult {
+// ping runs exactly one probe. The address family is taken from t.ip.
+func ping(ctx context.Context, ed edition, t target) PingResult {
 	network := ed.network + "6"
-	if ip.To4() != nil {
+	if t.ip.To4() != nil {
 		network = ed.network + "4"
 	}
-	start := time.Now()
-	info, err := ed.probe(ctx, network, ip.String(), port, host)
+	info, rtt, err := ed.probe(ctx, network, t)
 	if err == nil {
 		info.clip()
-		return PingResult{State: "online", RTTms: time.Since(start).Milliseconds(), Info: info}
+		return PingResult{State: "online", RTTms: rtt.Milliseconds(), Info: info}
 	}
-	return failure(err, ip)
+	return failure(err, t.ip)
 }
 
 // Longest server text kept. Status pages show a two-line MOTD; the other
@@ -124,6 +142,7 @@ func (i *ServerInfo) clip() {
 	i.MOTD = clip(i.MOTD, motdMax)
 	i.MOTDRaw = clip(i.MOTDRaw, rawMax)
 	i.MapRaw = clip(i.MapRaw, rawMax)
+	i.Contact = clip(i.Contact, motdMax)
 	for _, f := range []*string{&i.Edition, &i.Version, &i.Protocol, &i.Gamemode, &i.Map, &i.ServerID} {
 		*f = clip(*f, fieldMax)
 	}
@@ -152,6 +171,12 @@ func failure(err error, ip net.IP) PingResult {
 type probeError string
 
 func (e probeError) Error() string { return string(e) }
+
+// noStatus is a server that accepted the connection and closed it without
+// a status. The text names the likely reasons.
+type noStatus string
+
+func (e noStatus) Error() string { return "connected, no status (" + string(e) + ")" }
 
 // localNoRoute reports whether the error means this host cannot use the
 // address family of ip at all. "Network unreachable" can also be a
@@ -205,10 +230,13 @@ func rejection(err error) string {
 // "<outcome> (<detail>)", independent of how the backend is implemented.
 func describe(err error) string {
 	var pe probeError
+	var ns noStatus
 	var ne net.Error
 	switch {
 	case errors.As(err, &pe):
 		return "invalid data (" + string(pe) + ")"
+	case errors.As(err, &ns):
+		return ns.Error()
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled),
 		errors.Is(err, os.ErrDeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
 		return "no response (timeout)"
