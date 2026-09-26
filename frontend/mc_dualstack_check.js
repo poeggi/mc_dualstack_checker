@@ -26,10 +26,11 @@ var PROBE_TIMEOUT_MS = 12000;
 // ports. Each edition also needs an option in the page's edition menu.
 // The IPv6 port defaults to the IPv4 port; Bedrock servers commonly listen
 // on 19133 for IPv6, so that is the first IPv6 fallback. Java clients
-// follow a name's SRV record at srv.port; the backend does the same.
+// follow a name's SRV record at srv.port; the backend does the same. Java
+// addresses may carry a connection ID (ids).
 var EDITIONS = {
     bedrock: { v4: 19132, v6: 19133 },
-    java: { v4: 25565, v6: 25565, srv: { port: 25565, record: "_minecraft._tcp." } }
+    java: { v4: 25565, v6: 25565, srv: { port: 25565, record: "_minecraft._tcp." }, ids: true }
 };
 var DEFAULT_EDITION = "bedrock";
 
@@ -239,6 +240,7 @@ function checkFamily(fam, target, ports, edition, log) {
         var params = { port: port, edition: edition };
         if (byName) params.family = fam; else params.ip = result.ip;
         if (target.host) params.host = target.host;
+        if (target.id) params.id = target.id;
         return ping(params).then(function (r) {
             if (r.srv) {
                 result.srv = r.srv;
@@ -265,7 +267,8 @@ function checkFamily(fam, target, ports, edition, log) {
             result.ports_tried.push(probed);
             if (r.state === "online") {
                 var how = (r.rtt_ms ? r.rtt_ms + "ms" : "") + (r.cached ? ", cached " + r.age_s + "s ago" : "");
-                log.push("ONLINE: " + family + " responded on port " + probed + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
+                var via = r.info && TRANSPORTS[r.info.transport] ? " via " + TRANSPORTS[r.info.transport] : "";
+                log.push("ONLINE: " + family + " responded on port " + probed + via + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
                 result.state = "online"; result.port = probed; result.info = r.info;
                 result.rtt_ms = r.rtt_ms; result.cached = r.cached; result.age_s = r.age_s;
                 return result;
@@ -279,6 +282,8 @@ function checkFamily(fam, target, ports, edition, log) {
             }
             var reason = r.error || "no response";
             log.push(family + " port " + probed + ": " + reason);
+            var transports = Object.keys(r.errors || {});
+            if (transports.length > 1) transports.forEach(function (s) { log.push("  " + (TRANSPORTS[s] || s) + ": " + r.errors[s]); });
             result.statuses.push({ port: probed, text: reason.charAt(0).toUpperCase() + reason.slice(1) });
             if (r.state === "unreachable") result.rejected = true;
             result.cached = r.cached; result.age_s = r.age_s;
@@ -374,13 +379,22 @@ function runCheck(q) {
     showNotice("");
     $("results").hidden = true;
     document.title = q.host + " - Minecraft Server Dualstack Checker";
+    var edition = q.edition;
+    // A connection ID comes first: id@host, split at the first @ as the
+    // game does.
+    var host = q.host, id = "", at = host.indexOf("@");
+    if (at >= 0) {
+        id = host.slice(0, at);
+        host = host.slice(at + 1);
+        if (!EDITIONS[edition].ids) { showNotice("Connection IDs (id@host) are for Java only."); return; }
+        if (!host) { showNotice("A host name or IP address must follow the @."); return; }
+    }
     if (!backendReady) {
         showNotice("No checker backend is configured yet. The check cannot run.");
         return;
     }
     setBusy(true);
 
-    var edition = q.edition;
     var defaults = EDITIONS[edition];
     var port4 = q.port4 ? parseInt(q.port4, 10) : defaults.v4;
     var port6 = q.port6 ? parseInt(q.port6, 10) : port4;
@@ -394,13 +408,14 @@ function runCheck(q) {
 
     var startedAt = Math.floor(Date.now() / 1000);
     var log = [], log4 = [], log6 = [];
-    var literal = literalIP(q.host);
-    var target = literal ? { ip: literal.ip } : { host: q.host };
+    var literal = literalIP(host);
+    var target = literal ? { ip: literal.ip, id: id } : { host: host, id: id };
     var probe = function (fam, ports, famLog) {
         if (!literal || literal.family === fam) return checkFamily(fam, target, ports, edition, famLog);
         return { state: "omitted", reason: "Input is a literal IPv" + literal.family + " address" };
     };
     if (literal) log.push("Input is a literal IPv" + literal.family + " address, skipping DNS");
+    if (id) log.push("Connection ID: " + id);
 
     Promise.all([probe(4, ports4, log4), probe(6, ports6, log6)]).then(function (both) {
         setBusy(false);
@@ -475,6 +490,12 @@ function statusLines(statuses) {
 // Minecraft's 16 colours, by legacy code 0-9a-f.
 var MC_COLORS = ["000000", "0000aa", "00aa00", "00aaaa", "aa0000", "aa00aa", "ffaa00", "aaaaaa",
     "555555", "5555ff", "55ff55", "55ffff", "ff5555", "ff55ff", "ffff55", "ffffff"];
+// Bedrock's own colours: a brighter 9, and the material colours g-w, where
+// m and n are colours, not strikethrough and underline.
+var BEDROCK_COLORS = {
+    "9": "447fff", g: "efce16", h: "d9ccb8", i: "a9b4b7", j: "8f727d", m: "ee222c", n: "c87363",
+    p: "ffbf1e", q: "13a045", s: "5fecff", t: "577bff", u: "b66cdd", v: "ff6a00", w: "8bb3ff"
+};
 // Server colours darker than this lightness (0-255) are lifted to it, so
 // they stay readable on the dark cards.
 var MIN_LIGHTNESS = 120;
@@ -490,9 +511,11 @@ function readable(hex) {
 }
 
 // mcText renders text with legacy colour codes, a section sign plus one
-// character, as styled spans. A colour resets the formatting, as in the
-// game; a hex colour is x followed by six codes of one digit each.
-function mcText(raw) {
+// character, as styled spans, as the game of the edition does. In Java a
+// colour resets the formatting, and a hex colour is x followed by six codes
+// of one digit each. Bedrock keeps bold and italic across colours and has
+// more colours, no hex.
+function mcText(raw, bedrock) {
     var frag = document.createDocumentFragment();
     var style = {}, text = "";
     var flush = function () {
@@ -513,11 +536,12 @@ function mcText(raw) {
         if (!code) break;
         flush();
         var n = "0123456789abcdef".indexOf(code);
-        var hex = code === "x" && /^(\u00a7[0-9a-fA-F]){6}/.exec(raw.slice(i + 1));
-        if (n >= 0) style = { color: MC_COLORS[n] };
+        var color = (bedrock && BEDROCK_COLORS[code]) || (n >= 0 ? MC_COLORS[n] : "");
+        var hex = !bedrock && code === "x" && /^(\u00a7[0-9a-fA-F]){6}/.exec(raw.slice(i + 1));
+        if (color) style = bedrock ? { color: color, l: style.l, o: style.o, k: style.k } : { color: color };
         else if (hex) { style = { color: hex[0].replace(/\u00a7/g, "").toLowerCase() }; i += 12; }
         else if (code === "r") style = {};
-        else if ("lonmk".indexOf(code) >= 0) style[code] = true;
+        else if ((bedrock ? "lok" : "lonmk").indexOf(code) >= 0) style[code] = true;
     }
     flush();
     return frag;
@@ -547,6 +571,19 @@ function headIcon(info) {
     }).catch(function () { canvas.remove(); });
     return canvas;
 }
+
+// players is "online / max"; a count the server did not provide shows as "?".
+function players(info) {
+    var n = [info.players_online, info.players_max];
+    if (n[0] === undefined && n[1] === undefined) return "";
+    return n.map(function (v) { return v === undefined ? "?" : v; }).join(" / ");
+}
+
+// Bedrock's transports, as the More section and the log name them. Java
+// has one, so its cards show none.
+var TRANSPORTS = { nethernet: "NetherNet (TCP)", raknet: "RakNet (UDP)" };
+var NETHERNET_HINT = "The server's NetherNet signalling answered. The game traffic, WebRTC over UDP, is not tested.";
+var BARE_HINT = "The server answered but provided no details. Vanilla Bedrock servers do so when LAN visibility is off (enable-lan-visibility=false).";
 
 function announced(info) {
     return [info.port4 && "v4 " + info.port4, info.port6 && "v6 " + info.port6].filter(Boolean).join(", ");
@@ -592,16 +629,27 @@ function ipCard(r, label) {
 
     if (state === "online") {
         var info = r.info || {};
+        // A server may answer without telling anything about itself.
+        var bare = Object.keys(info).every(function (k) { return k === "transport"; });
         rows.appendChild(row("Port", portList(r.ports_tried, r.port)));
         if (r.rtt_ms) rows.appendChild(row("Latency", r.rtt_ms + "ms" + (r.cached ? ", cached " + r.age_s + "s ago" : "")));
-        rows.appendChild(row("Players", info.players_online + " / " + info.players_max));
-        if (info.motd) rows.appendChild(row("MOTD", info.motd_raw ? mcText(info.motd_raw) : info.motd));
+        if (bare) {
+            var details = row("Details", "No info provided", true);
+            details.lastChild.classList.add("hint");
+            details.lastChild.title = BARE_HINT;
+            rows.appendChild(details);
+        } else {
+            rows.appendChild(players(info) ? row("Players", players(info)) : row("Players", "not provided", true));
+        }
+        if (info.server_name) rows.appendChild(row("Server Name", info.server_name_raw ? mcText(info.server_name_raw, true) : info.server_name));
+        if (info.motd) rows.appendChild(row("MOTD", info.motd_raw ? mcText(info.motd_raw, false) : info.motd));
         if (info.version) rows.appendChild(row("Version", info.version));
 
         var extra = [
-            ["Map", info.map && (info.map_raw ? mcText(info.map_raw) : info.map)], ["Gamemode", info.gamemode],
+            ["Transport", TRANSPORTS[info.transport], info.transport === "nethernet" ? NETHERNET_HINT : ""],
+            ["Level", info.level && (info.level_raw ? mcText(info.level_raw, true) : info.level)], ["Game Mode", info.game_mode],
             ["Protocol", info.protocol === "-1" ? "-1 (any)" : info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
-            ["Server ID", info.server_id]
+            ["Server ID", info.server_id], ["Contact", info.contact]
         ].filter(function (kv) { return kv[1]; });
         if (extra.length) {
             var id = "card-extra-" + (++cardCounter);
@@ -609,7 +657,11 @@ function ipCard(r, label) {
             cb.type = "checkbox"; cb.id = id; cb.setAttribute("aria-hidden", "true");
             rows.appendChild(cb);
             var extraWrap = el("div", "ip-rows-extra");
-            extra.forEach(function (kv) { extraWrap.appendChild(row(kv[0], kv[1])); });
+            extra.forEach(function (kv) {
+                var line = row(kv[0], kv[1]);
+                if (kv[2]) { line.firstChild.classList.add("hint"); line.firstChild.title = kv[2]; }
+                extraWrap.appendChild(line);
+            });
             rows.appendChild(extraWrap);
             var toggle = el("label", "ip-row ip-row-toggle");
             toggle.htmlFor = id;

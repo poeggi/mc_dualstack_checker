@@ -277,8 +277,8 @@ button.btn-active::after {
 }
 .ip-row { display: flex; align-items: baseline; gap: .75rem; }
 .ip-row:last-child { border-bottom: none; }
-.ip-row-key { min-width: 10ch; flex-shrink: 0; white-space: nowrap; overflow-wrap: normal; }
-.ip-row-key.hint { cursor: help; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: .2em; }
+.ip-row-key { min-width: 11ch; flex-shrink: 0; white-space: nowrap; overflow-wrap: normal; }
+.ip-row-key.hint, .ip-row-val.hint { cursor: help; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: .2em; }
 
 .port-used   { color: var(--green); }
 .port-struck { color: var(--red); text-decoration: line-through; }
