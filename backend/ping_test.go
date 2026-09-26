@@ -17,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestFailure(t *testing.T) {
@@ -150,6 +151,32 @@ func TestHostName(t *testing.T) {
 		if got := hostName(in); got != want {
 			t.Errorf("hostName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A resolver that ignores its deadline is waited for until srvWait: an
+// answer after srvTimeout still counts, a later one is not waited for.
+func TestLookupSRVWait(t *testing.T) {
+	defer func(r func(context.Context, string, string, string) (string, []*net.SRV, error)) { srvResolver = r }(srvResolver)
+	answerAfter := func(d time.Duration) func(context.Context, string, string, string) (string, []*net.SRV, error) {
+		return func(context.Context, string, string, string) (string, []*net.SRV, error) {
+			time.Sleep(d)
+			return "", []*net.SRV{{Target: "mc.example.net.", Port: 25577}}, nil
+		}
+	}
+
+	srvResolver = answerAfter(srvTimeout + 200*time.Millisecond)
+	if got := lookupSRV(context.Background(), "minecraft", "tcp", "play.example.net"); got == nil {
+		t.Errorf("answer before srvWait dropped")
+	}
+
+	srvResolver = answerAfter(10 * time.Second)
+	start := time.Now()
+	if got := lookupSRV(context.Background(), "minecraft", "tcp", "play.example.net"); got != nil {
+		t.Errorf("answer after srvWait used: %+v", got)
+	}
+	if waited := time.Since(start); waited < srvWait || waited > srvWait+time.Second {
+		t.Errorf("waited %v, want about %v", waited, srvWait)
 	}
 }
 

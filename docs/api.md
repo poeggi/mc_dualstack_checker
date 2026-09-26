@@ -21,7 +21,7 @@ With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `
 
 `host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
-Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
+Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails or takes longer than 2 s, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
 
 `host` must be a DNS name of letters, digits, hyphens and underscores, labels of at most 63 characters, 253 in total; a trailing dot is allowed. Otherwise the request answers `400`, or with `ip` the name is ignored.
 

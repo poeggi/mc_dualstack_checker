@@ -37,6 +37,7 @@ import (
 const (
 	resolveTimeout = 4 * time.Second
 	srvTimeout     = 2 * time.Second
+	srvWait        = srvTimeout + 500*time.Millisecond
 	pingTimeout    = 6 * time.Second
 	maxHostLen     = 253
 	healthInterval = 7 * time.Second
@@ -199,17 +200,37 @@ func resolveFamily(ctx context.Context, name, family string) (net.IP, error) {
 	return nil, nil
 }
 
+// srvResolver looks up SRV records; tests replace it.
+var srvResolver = net.DefaultResolver.LookupSRV
+
 // lookupSRV returns where the SRV record _<service>._<proto> of name sends
 // clients, nil when there is none. Clients use the name as given when the
 // lookup fails, and so does this.
+//
+// The resolver stops at srvTimeout. Some system resolvers, the one on
+// Windows among them, cannot be stopped: after srvWait the lookup is left
+// to finish on its own, as the net package does with Windows address
+// lookups. srvWait is later than srvTimeout, so it never cuts short a
+// resolver that keeps the limit.
 func lookupSRV(ctx context.Context, service, proto, name string) *SRVTarget {
 	if localName(name) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, srvTimeout)
 	defer cancel()
-	_, addrs, _ := net.DefaultResolver.LookupSRV(ctx, service, proto, name+".")
-	return srvTarget(addrs)
+	found := make(chan []*net.SRV, 1)
+	go func() {
+		_, addrs, _ := srvResolver(ctx, service, proto, name+".")
+		found <- addrs
+	}()
+	wait := time.NewTimer(srvWait)
+	defer wait.Stop()
+	select {
+	case addrs := <-found:
+		return srvTarget(addrs)
+	case <-wait.C:
+		return nil
+	}
 }
 
 // srvTarget is the first usable record, in the resolver's order of
