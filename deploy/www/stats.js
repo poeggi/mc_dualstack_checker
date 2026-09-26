@@ -298,6 +298,7 @@ function switches() {
         b.classList.toggle("on", b.dataset.metric ? b.dataset.metric === metric : b.dataset.view === shown());
         b.disabled = !!b.dataset.view && metric === "clients";
     });
+    document.querySelector(".by").classList.toggle("off", metric === "clients");
 }
 
 function redraw() {
