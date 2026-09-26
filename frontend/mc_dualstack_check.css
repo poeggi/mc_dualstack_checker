@@ -326,4 +326,6 @@ button.btn-active::after {
         --pad-card: .6rem;
     }
     body { padding: .4rem .6rem; }
+    /* The edition and the two ports share one line down to 320 px screens. */
+    .field:not(.field-wide) { flex-basis: 5.5rem; }
 }
