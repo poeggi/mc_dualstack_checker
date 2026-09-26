@@ -7,10 +7,10 @@ rest on secondary sources or single observations. The decisions are in
 
 ## Goal
 
-- Support the current and the upcoming probe schemes of both editions.
-- The user types host and port as today. The right scheme is found automatically.
-- The card's More section names the scheme that answered.
-- The log shows every scheme tried.
+- Support the current and the upcoming transports of both editions.
+- The user types host and port as today. The right transport is found automatically.
+- The card's More section names the transport that answered.
+- The log shows every transport tried.
 
 ## How we probe today (v1.5.x)
 

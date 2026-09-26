@@ -39,7 +39,7 @@ var netherNetModes = map[int]string{0: "Survival", 1: "Creative", 2: "Adventure"
 // the first byte of the answer.
 func pingNetherNet(ctx context.Context, network string, t target) (*ServerInfo, time.Duration, error) {
 	info, rtt, a, err := netherNetJoin(ctx, network, t, false)
-	if err == nil || !a.connected {
+	if err == nil || !a.connected || a.ok || ctx.Err() != nil {
 		return info, rtt, err
 	}
 	info, rtt, b, terr := netherNetJoin(ctx, network, t, true)
@@ -53,8 +53,9 @@ func pingNetherNet(ctx context.Context, network string, t target) (*ServerInfo, 
 	return nil, 0, err
 }
 
-// attempt is how far one request got.
-type attempt struct{ connected, handshake bool }
+// attempt is how far one request got: connected, through the TLS handshake,
+// to a 2xx answer.
+type attempt struct{ connected, handshake, ok bool }
 
 // netherNetJoin sends one GET /v1/join to t, over TLS when secure. The
 // certificate is not checked: the status is public, and vanilla servers
@@ -105,7 +106,7 @@ func netherNetJoin(ctx context.Context, network string, t target, secure bool) (
 		// close is a reply that is no HTTP, such as a TLS alert.
 		var op *net.OpError
 		if a.connected && !errors.As(err, &op) && !errors.Is(err, context.DeadlineExceeded) &&
-			!errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			!errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			err = probeError("no HTTP answer")
 		}
 		return nil, 0, a, err
@@ -118,6 +119,7 @@ func netherNetJoin(ctx context.Context, network string, t target, secure bool) (
 	if res.StatusCode < 200 || res.StatusCode > 299 {
 		return nil, 0, a, probeError(fmt.Sprintf("HTTP %d", res.StatusCode))
 	}
+	a.ok = true
 	body, err := io.ReadAll(io.LimitReader(res.Body, netherNetMaxBody+1))
 	if err != nil {
 		return nil, 0, a, err

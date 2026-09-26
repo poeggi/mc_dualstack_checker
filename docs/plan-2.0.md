@@ -141,6 +141,8 @@ Nothing open blocks the work. What stays unverified:
 - The client's TLS-then-HTTP order and its User-Agent come from third-party code, not from first-party code.
 - The game path (WebRTC over UDP) is not probed; a NetherNet answer proves the signalling only.
 - Java 26.4 is a snapshot. Recheck the ID format at its first pre-release.
+- Vanilla reads the handshake host as at most 255 characters. `host?_id=<id>` beyond that is refused like a wrong
+  ID; the game has the same limit. Names of up to about 185 characters are safe with the longest ID.
 
 ## Order of work
 

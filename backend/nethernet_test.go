@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -104,6 +105,20 @@ func TestPingNetherNetTLS(t *testing.T) {
 		if err != nil || info.ServerName != "Dedicated Server" {
 			t.Errorf("%s: %+v %v", name, info, err)
 		}
+	}
+}
+
+// A 2xx that is no status gets no request over TLS: the server spoke HTTP.
+func TestPingNetherNetOnceAfter2xx(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("<html>hello</html>"))
+	}))
+	defer srv.Close()
+	_, _, err := pingNetherNet(context.Background(), "tcp4", joinTarget(t, srv.Listener.Addr().String()))
+	if err == nil || hits.Load() != 1 {
+		t.Errorf("err %v after %d requests, want an error after one", err, hits.Load())
 	}
 }
 
