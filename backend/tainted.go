@@ -31,3 +31,46 @@ func (t tainted) plain(max int) string { return clip(stripFormatting(t.clean(len
 
 // coded is clean text with its formatting codes, "" when it has none.
 func (t tainted) coded(max int) string { return formatted(t.clean(max)) }
+
+// Longest server text kept. Status pages show a two-line MOTD; the other
+// fields are short names and numbers. Colour codes can take more room than
+// the text they colour. The limits keep cached results small.
+const (
+	motdMax  = 256
+	rawMax   = 2048
+	fieldMax = 64
+)
+
+// clip cuts s to at most n bytes without splitting a character.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
+}
+
+// formatted returns s when it carries colour codes, else "".
+func formatted(s string) string {
+	if strings.ContainsRune(s, 0xA7) {
+		return s
+	}
+	return ""
+}
+
+// stripFormatting removes Minecraft "section sign" colour codes.
+func stripFormatting(s string) string {
+	var out strings.Builder
+	skip := false
+	for _, r := range s {
+		if skip {
+			skip = false
+			continue
+		}
+		if r == 0xA7 {
+			skip = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return strings.TrimSpace(out.String())
+}

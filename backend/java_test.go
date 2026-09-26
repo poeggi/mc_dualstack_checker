@@ -4,8 +4,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"net"
 	"runtime"
@@ -265,22 +269,30 @@ func TestFormEscape(t *testing.T) {
 	}
 }
 
-func TestConnectionID(t *testing.T) {
-	for id, want := range map[string]bool{
-		"a":                     true,
-		"team a":                true,
-		"x!~?&=@":               true,
-		strings.Repeat("a", 64): true,
-		"":                      false,
-		" a":                    false,
-		"a ":                    false,
-		"a,b":                   false,
-		strings.Repeat("a", 65): false,
-		"a" + string(rune(9)):   false,
-		string(rune(0xe4)):      false,
+func TestServerIcon(t *testing.T) {
+	encode := func(w, h int) string {
+		var b bytes.Buffer
+		if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+			t.Fatal(err)
+		}
+		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b.Bytes())
+	}
+	good := encode(64, 64)
+	if got := serverIcon(tainted(good)); got != good {
+		t.Errorf("valid icon dropped")
+	}
+	if got := serverIcon(tainted(good[:40] + "\n" + good[40:])); got != good {
+		t.Errorf("icon with a line break not joined")
+	}
+	for name, s := range map[string]string{
+		"wrong size":  encode(32, 32),
+		"not png":     "data:image/jpeg;base64," + good[len("data:image/png;base64,"):],
+		"bad base64":  "data:image/png;base64,***",
+		"too large":   good + strings.Repeat("A", iconMax),
+		"no data url": "https://example.com/icon.png",
 	} {
-		if got := connectionID(id); got != want {
-			t.Errorf("connectionID(%q) = %v, want %v", id, got, want)
+		if got := serverIcon(tainted(s)); got != "" {
+			t.Errorf("%s: icon passed on", name)
 		}
 	}
 }

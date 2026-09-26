@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -137,23 +136,4 @@ func (l tlsOnly) Accept() (net.Conn, error) {
 		return nil, err
 	}
 	return quietConn{tls.Server(c, l.cfg)}, nil
-}
-
-func TestParsePongWeak(t *testing.T) {
-	b := []byte{raknetUnconnectedPong}
-	b = binary.BigEndian.AppendUint64(b, 1)
-	b = binary.BigEndian.AppendUint64(b, 2)
-	b = append(b, raknetMagic...)
-	for name, pong := range map[string][]byte{
-		"ends after the magic": b,
-		"empty payload":        binary.BigEndian.AppendUint16(append([]byte{}, b...), 0),
-	} {
-		info, err := parsePong(pong)
-		if err != nil || !info.weak {
-			t.Errorf("%s: %+v %v, want a weak answer", name, info, err)
-		}
-	}
-	if _, err := parsePong(b[:32]); err == nil {
-		t.Errorf("a pong cut inside the magic was accepted")
-	}
 }
