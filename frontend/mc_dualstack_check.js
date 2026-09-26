@@ -590,6 +590,9 @@ function announced(info) {
 }
 
 var cardCounter = 0;
+// moreOpen is whether a card's More section is open, by card, so that a new
+// check shows it as the user left it.
+var moreOpen = {};
 
 function ipCard(r, label) {
     var state = r.state;
@@ -655,6 +658,8 @@ function ipCard(r, label) {
             var id = "card-extra-" + (++cardCounter);
             var cb = el("input", "card-extra-toggle");
             cb.type = "checkbox"; cb.id = id; cb.setAttribute("aria-hidden", "true");
+            cb.checked = !!moreOpen[label];
+            cb.addEventListener("change", function () { moreOpen[label] = cb.checked; });
             rows.appendChild(cb);
             var extraWrap = el("div", "ip-rows-extra");
             extra.forEach(function (kv) {
