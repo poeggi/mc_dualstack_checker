@@ -94,16 +94,31 @@ func parsePong(b []byte) (*ServerInfo, error) {
 	info := &ServerInfo{
 		Edition:  get(0),
 		MOTD:     stripFormatting(get(1)),
+		MOTDRaw:  formatted(get(1)),
 		Protocol: get(2),
 		Version:  get(3),
 		ServerID: get(6),
 		Map:      stripFormatting(get(7)),
+		MapRaw:   formatted(get(7)),
 		Gamemode: get(8),
 	}
 	info.PlayersOnline, _ = strconv.Atoi(get(4))
 	info.PlayersMax, _ = strconv.Atoi(get(5))
+	// The ports the server is configured for, as it announces them for LAN
+	// discovery. Behind port forwarding they differ from the probed port.
+	info.Port4 = announcedPort(get(10))
+	info.Port6 = announcedPort(get(11))
 	if info.Edition == "" {
 		return nil, probeError("empty pong payload")
 	}
 	return info, nil
+}
+
+// announcedPort is the port in s, 0 when s is no valid port.
+func announcedPort(s string) int {
+	p, err := strconv.Atoi(s)
+	if err != nil || p < 1 || p > 65535 {
+		return 0
+	}
+	return p
 }

@@ -24,8 +24,12 @@ var HOST_REFRESH_MS = 6500;
 var PROBE_TIMEOUT_MS = 12000;
 // Default ports per edition. The IPv6 port defaults to the IPv4 port;
 // Bedrock servers commonly listen on 19133 for IPv6, so that is the first
-// IPv6 fallback.
-var EDITIONS = { bedrock: { v4: 19132, v6: 19133 }, java: { v4: 25565, v6: 25565 } };
+// IPv6 fallback. Java clients follow a name's SRV record at srv.port; the
+// backend does the same.
+var EDITIONS = {
+    bedrock: { v4: 19132, v6: 19133 },
+    java: { v4: 25565, v6: 25565, srv: { port: 25565, record: "_minecraft._tcp." } }
+};
 var DEFAULT_EDITION = "bedrock";
 
 var $ = function (id) { return document.getElementById(id); };
@@ -209,10 +213,14 @@ function literalIP(host) {
 
 // Probes one family on the given ports in order and stops at the first
 // answer. For a host name the first probe also resolves it on the backend;
-// later ports reuse the address it returned.
+// later ports reuse the address it returned. At the SRV port the name is
+// sent again, so the backend can follow the record; after an SRV redirect
+// no further port is tried, as clients try none.
 function checkFamily(fam, target, ports, edition, log) {
     var family = "IPv" + fam, record = fam === 4 ? "A" : "AAAA";
+    var srv = EDITIONS[edition].srv;
     var result = { state: "offline", ip: target.ip || "", ports_tried: [], statuses: [] };
+    var lastPort = 0;
     function tryPort(i) {
         if (i >= ports.length) {
             if (result.rejected) {
@@ -224,29 +232,40 @@ function checkFamily(fam, target, ports, edition, log) {
             return result;
         }
         var port = ports[i];
-        if (i > 0) log.push("Port " + ports[i - 1] + " failed, retrying port " + port);
-        log.push("Checking " + family + ": " + (result.ip || target.host) + " port " + port);
+        if (i > 0) log.push("Port " + lastPort + " failed, retrying port " + port);
+        var byName = target.host && (!result.ip || (srv && port === srv.port));
+        log.push("Checking " + family + ": " + (byName ? target.host : result.ip) + " port " + port);
         var params = { port: port, edition: edition };
-        if (result.ip) params.ip = result.ip; else params.family = fam;
+        if (byName) params.family = fam; else params.ip = result.ip;
         if (target.host) params.host = target.host;
         return ping(params).then(function (r) {
+            if (r.srv) {
+                result.srv = r.srv;
+                result.srv_record = srv.record + target.host;
+                log.push("SRV " + result.srv_record + ": " + r.srv.host + " port " + r.srv.port);
+            }
+            var lookedUp = r.srv ? " for " + r.srv.host : "";
             if (r.state === "no_dns") {
-                log.push("Resolved " + family + ": no " + record + " record");
-                return { state: "no_dns", reason: "No " + record + " record found" };
+                log.push("Resolved " + family + ": no " + record + " record" + lookedUp);
+                return { state: "no_dns", reason: "No " + record + " record found" + lookedUp,
+                    srv: result.srv, srv_record: result.srv_record };
             }
             if (r.state === "dns_error") {
-                log.push("ERROR: " + family + " lookup failed: " + (r.error || "unknown"));
-                return { state: "dns_error", reason: record + " lookup failed (" + (r.error || "error") + ")" };
+                log.push("ERROR: " + family + " lookup failed" + lookedUp + ": " + (r.error || "unknown"));
+                return { state: "dns_error", reason: record + " lookup failed" + lookedUp + " (" + (r.error || "error") + ")",
+                    srv: result.srv, srv_record: result.srv_record };
             }
-            if (!result.ip && r.ip) {
+            if (r.ip && r.ip !== result.ip) {
                 result.ip = r.ip;
                 log.push("Resolved " + family + ": " + r.ip);
             }
-            result.ports_tried.push(port);
+            var probed = r.srv ? r.srv.port : port;
+            lastPort = probed;
+            result.ports_tried.push(probed);
             if (r.state === "online") {
                 var how = (r.rtt_ms ? r.rtt_ms + "ms" : "") + (r.cached ? ", cached " + r.age_s + "s ago" : "");
-                log.push("ONLINE: " + family + " responded on port " + port + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
-                result.state = "online"; result.port = port; result.info = r.info;
+                log.push("ONLINE: " + family + " responded on port " + probed + (how ? " (" + how.replace(/^, /, "") + ")" : ""));
+                result.state = "online"; result.port = probed; result.info = r.info;
                 result.rtt_ms = r.rtt_ms; result.cached = r.cached; result.age_s = r.age_s;
                 return result;
             }
@@ -258,11 +277,11 @@ function checkFamily(fam, target, ports, edition, log) {
                 return result;
             }
             var reason = r.error || "no response";
-            log.push(family + " port " + port + ": " + reason);
-            result.statuses.push({ port: port, text: reason.charAt(0).toUpperCase() + reason.slice(1) });
+            log.push(family + " port " + probed + ": " + reason);
+            result.statuses.push({ port: probed, text: reason.charAt(0).toUpperCase() + reason.slice(1) });
             if (r.state === "unreachable") result.rejected = true;
             result.cached = r.cached; result.age_s = r.age_s;
-            return tryPort(i + 1);
+            return tryPort(r.srv ? ports.length : i + 1);
         });
     }
     return tryPort(0);
@@ -451,6 +470,66 @@ function statusLines(statuses) {
     return frag;
 }
 
+// Minecraft's 16 colours, by legacy code 0-9a-f.
+var MC_COLORS = ["000000", "0000aa", "00aa00", "00aaaa", "aa0000", "aa00aa", "ffaa00", "aaaaaa",
+    "555555", "5555ff", "55ff55", "55ffff", "ff5555", "ff55ff", "ffff55", "ffffff"];
+// Server colours darker than this lightness (0-255) are lifted to it, so
+// they stay readable on the dark cards.
+var MIN_LIGHTNESS = 120;
+
+function readable(hex) {
+    var c = [0, 2, 4].map(function (i) { return parseInt(hex.substr(i, 2), 16); });
+    var l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    if (l < MIN_LIGHTNESS) {
+        var mix = (MIN_LIGHTNESS - l) / (255 - l);
+        c = c.map(function (v) { return Math.round(v + (255 - v) * mix); });
+    }
+    return "rgb(" + c.join(",") + ")";
+}
+
+// mcText renders text with legacy colour codes, a section sign plus one
+// character, as styled spans. A colour resets the formatting, as in the
+// game; a hex colour is x followed by six codes of one digit each.
+function mcText(raw) {
+    var frag = document.createDocumentFragment();
+    var style = {}, text = "";
+    var flush = function () {
+        if (!text) return;
+        var s = el("span", "", text);
+        if (style.color) s.style.color = readable(style.color);
+        if (style.l) s.style.fontWeight = "600";
+        if (style.o) s.style.fontStyle = "italic";
+        var deco = [style.n ? "underline" : "", style.m ? "line-through" : ""].join(" ").trim();
+        if (deco) s.style.textDecoration = deco;
+        frag.appendChild(s);
+        text = "";
+    };
+    for (var i = 0; i < raw.length; i++) {
+        var ch = raw.charAt(i);
+        if (ch !== "\u00a7") { text += ch; continue; }
+        var code = raw.charAt(++i).toLowerCase();
+        if (!code) break;
+        flush();
+        var n = "0123456789abcdef".indexOf(code);
+        var hex = code === "x" && /^(\u00a7[0-9a-fA-F]){6}/.exec(raw.slice(i + 1));
+        if (n >= 0) style = { color: MC_COLORS[n] };
+        else if (hex) { style = { color: hex[0].replace(/\u00a7/g, "").toLowerCase() }; i += 12; }
+        else if (code === "r") style = {};
+        else if ("lonmk".indexOf(code) >= 0) style[code] = true;
+    }
+    flush();
+    return frag;
+}
+
+// A server icon is shown only as the PNG data URL the backend passes on.
+function iconURL(info) {
+    return info && info.icon && info.icon.indexOf("data:image/png;base64,") === 0 ? info.icon : "";
+}
+
+function announced(info) {
+    return [info.port4 && "v4 " + info.port4, info.port6 && "v6 " + info.port6].filter(Boolean).join(", ");
+}
+
 var cardCounter = 0;
 
 function ipCard(r, label) {
@@ -458,11 +537,20 @@ function ipCard(r, label) {
     var cls = state === "online" ? "online" : state === "offline" || state === "unreachable" ? "offline" : "unknown";
     var card = el("div", "card ip-card " + cls);
     var head = el("div", "ip-card-head text-strong");
-    head.appendChild(el("span", "", label));
+    var title = el("span", "head-title");
+    title.appendChild(el("span", "", label));
+    var icon = state === "online" ? iconURL(r.info) : "";
+    if (icon) {
+        var img = el("img", "head-icon");
+        img.src = icon; img.alt = ""; img.width = 20; img.height = 20;
+        title.appendChild(img);
+    }
+    head.appendChild(title);
     var badges = el("span", "badge-group");
     if (state === "online" || state === "offline" || state === "unreachable" || state === "no_route") {
         badges.appendChild(el("span", r.cached ? "badge cache" : "badge live", r.cached ? "Cached" : "Live"));
     }
+    if (r.srv) badges.appendChild(el("span", "badge srv", "SRV"));
     if (state === "online" && r.ports_tried.length > 1) badges.appendChild(el("span", "badge fallback", "Fallback"));
     var badgeText = {
         online: "Online", offline: "Offline", unreachable: "Unreachable", no_dns: "No DNS",
@@ -476,17 +564,26 @@ function ipCard(r, label) {
     var rows = el("div", "ip-rows");
     card.appendChild(rows);
 
+    if (r.srv) {
+        var redirect = row("Redirect", r.srv.host + ":" + r.srv.port);
+        var key = redirect.firstChild;
+        key.classList.add("hint");
+        key.title = "Redirected by the DNS SRV record " + r.srv_record + ". Game clients follow it too.";
+        rows.appendChild(redirect);
+    }
+
     if (state === "online") {
         var info = r.info || {};
         rows.appendChild(row("Port", portList(r.ports_tried, r.port)));
         if (r.rtt_ms) rows.appendChild(row("Latency", r.rtt_ms + "ms" + (r.cached ? ", cached " + r.age_s + "s ago" : "")));
         rows.appendChild(row("Players", info.players_online + " / " + info.players_max));
-        if (info.motd) rows.appendChild(row("MOTD", info.motd));
+        if (info.motd) rows.appendChild(row("MOTD", info.motd_raw ? mcText(info.motd_raw) : info.motd));
         if (info.version) rows.appendChild(row("Version", info.version));
 
         var extra = [
-            ["Map", info.map], ["Gamemode", info.gamemode], ["Protocol", info.protocol],
-            ["Edition", info.edition], ["Server ID", info.server_id]
+            ["Map", info.map && (info.map_raw ? mcText(info.map_raw) : info.map)], ["Gamemode", info.gamemode],
+            ["Protocol", info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
+            ["Server ID", info.server_id]
         ].filter(function (kv) { return kv[1]; });
         if (extra.length) {
             var id = "card-extra-" + (++cardCounter);

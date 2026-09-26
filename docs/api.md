@@ -21,6 +21,8 @@ With `ip` (literal IPv4 or IPv6, brackets allowed), the address family follows `
 
 `host` is also sent in the Java handshake, since some proxies route on it. It is the system name for the limits.
 
+Java names at port 25565 follow the SRV record `_minecraft._tcp.<host>`, as Java clients do. The backend then looks up and probes the record's target and port, and sends the target in the handshake. The answer carries `srv`, also for `no_dns` and `dns_error`. Without a usable record, or when the SRV lookup fails, the name is used as given. Other ports, literal addresses and Bedrock never look up SRV.
+
 `host` must be a DNS name of letters, digits and hyphens, labels of at most 63 characters, 253 in total; a trailing dot is allowed. Otherwise the request answers `400`, or with `ip` the name is ignored.
 
 Internal addresses in `ip` answer `400`: loopback, unspecified, link-local, RFC 1918, shared (`100.64.0.0/10`), unique local (`fc00::/7`), site-local, multicast and reserved ranges. NAT64 forms of those count as well.
@@ -48,7 +50,10 @@ Names are looked up as absolute names, so the checker host's search domains are 
     "players_max": 20,
     "gamemode": "Survival",
     "map": "Bedrock level",
-    "server_id": "1234567890123456789"
+    "server_id": "1234567890123456789",
+    "motd_raw": "\u00a7bMy Bedrock Server",
+    "port4": 19132,
+    "port6": 19133
   }
 }
 ```
@@ -60,7 +65,14 @@ Names are looked up as absolute names, so the checker host's search domains are 
 | `rtt_ms` | round trip of the probe, `online` only |
 | `error` | short reason, all states but `online` and `no_dns`, see below |
 | `cached`, `age_s` | `cached` is present when answered from the 60 s cache; `age_s` is the result's age in seconds, 0 for a fresh probe |
-| `info` | server data; `gamemode`, `map`, `server_id` are Bedrock only; formatting codes are stripped from `motd` and `map` |
+| `srv` | `host` and `port` the name's SRV record sent the probe to, see above |
+| `info` | server data; `gamemode`, `map`, `server_id`, `port4`, `port6` are Bedrock only, `icon` is Java only; formatting codes are stripped from `motd` and `map` |
+
+More `info` fields:
+
+- `motd_raw`, `map_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
+- `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
+- `port4`, `port6`: the ports a Bedrock server announces. They are its own settings, meant for LAN discovery. Behind port forwarding they differ from the probed port.
 
 States:
 

@@ -32,9 +32,11 @@ import (
 	"time"
 )
 
-// A name lookup and a probe together stay within 10 s.
+// A name lookup and a probe together stay within 10 s. The SRV lookup is
+// part of the name lookup's time.
 const (
 	resolveTimeout = 4 * time.Second
+	srvTimeout     = 2 * time.Second
 	pingTimeout    = 6 * time.Second
 	maxHostLen     = 253
 	healthInterval = 7 * time.Second
@@ -112,6 +114,12 @@ func main() {
 // "" unless it consists of letters, digits and hyphens in labels of at most
 // 63 characters.
 func hostName(host string) string {
+	return dnsName(host, "-")
+}
+
+// dnsName is hostName with the characters besides letters and digits
+// given in extra.
+func dnsName(host, extra string) string {
 	name := strings.ToLower(strings.TrimSuffix(host, "."))
 	if name == "" || len(name) > maxHostLen {
 		return ""
@@ -121,7 +129,7 @@ func hostName(host string) string {
 			return ""
 		}
 		for _, c := range label {
-			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && !strings.ContainsRune(extra, c) {
 				return ""
 			}
 		}
@@ -197,6 +205,35 @@ func resolveFamily(ctx context.Context, name, family string) (net.IP, error) {
 	return nil, nil
 }
 
+// javaDefaultPort is the only port at which Java clients follow an SRV
+// record; any other port they take as given.
+const javaDefaultPort = 25565
+
+// lookupSRV returns where the _minecraft._tcp SRV record of name sends Java
+// clients, nil when there is none. Clients use the name as given when the
+// lookup fails, and so does this.
+func lookupSRV(ctx context.Context, name string) *SRVTarget {
+	if localName(name) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, srvTimeout)
+	defer cancel()
+	_, addrs, _ := net.DefaultResolver.LookupSRV(ctx, "minecraft", "tcp", name+".")
+	return srvTarget(addrs)
+}
+
+// srvTarget is the first usable record, in the resolver's order of
+// priority and weight. A target of "." offers no service. Targets may
+// contain underscores; clients resolve those too.
+func srvTarget(addrs []*net.SRV) *SRVTarget {
+	for _, a := range addrs {
+		if host := dnsName(a.Target, "-_"); host != "" && a.Port != 0 {
+			return &SRVTarget{Host: host, Port: int(a.Port)}
+		}
+	}
+	return nil
+}
+
 func lookupReason(err error) string {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) && dnsErr.IsTimeout {
@@ -263,20 +300,30 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	cached := false
 	defer func() { countPing(client, cached) }()
 
+	// The name sent in the Java handshake: the SRV target when there is one.
+	label := host
+	var srv *SRVTarget
 	if ip == nil {
 		// A lookup takes one of the in-flight slots while it runs.
 		if !acquireSlot() {
 			busy(w)
 			return
 		}
-		ip, err = resolveFamily(r.Context(), host, family)
+		lctx, cancel := context.WithTimeout(r.Context(), resolveTimeout)
+		if edition == "java" && port == javaDefaultPort {
+			if srv = lookupSRV(lctx, host); srv != nil {
+				label, port = srv.Host, srv.Port
+			}
+		}
+		ip, err = resolveFamily(lctx, label, family)
+		cancel()
 		releaseSlot()
 		switch {
 		case err != nil:
-			writeJSON(w, PingResult{State: "dns_error", Error: lookupReason(err)})
+			writeJSON(w, PingResult{State: "dns_error", Error: lookupReason(err), SRV: srv})
 			return
 		case ip == nil:
-			writeJSON(w, PingResult{State: "no_dns"})
+			writeJSON(w, PingResult{State: "no_dns", SRV: srv})
 			return
 		}
 	}
@@ -291,7 +338,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 			return PingResult{State: "busy"}, false
 		}
 		defer releaseSlot()
-		return ping(ctx, edition, ip, port, host), true
+		return ping(ctx, edition, ip, port, label), true
 	})
 	cached = res.Cached
 	if res.State == "busy" {
@@ -299,6 +346,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res.IP = ip.String()
+	res.SRV = srv
 	writeJSON(w, res)
 }
 

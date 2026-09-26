@@ -43,7 +43,7 @@ The page is a static file. The deploy writes the API address and the page versio
 
 When a probe cannot reach the API, or gets no answer within 12 s, the page asks `api/backend-health`. If that copy is older than 7 s, it asks once more after 6.5 s. If the web host cannot reach the API either, it shows "API unavailable." Otherwise it shows "The API is online, but your browser cannot reach it."
 
-Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state.
+Frontend behaviour: a literal IP skips DNS and omits the other family. A name is resolved by the backend, per family. Without "Disable port fallback" the edition default ports are retried; for Bedrock IPv6 that means 19133, then 19132. For Java at port 25565 the backend follows the name's SRV record, as Java clients do. The card then shows an SRV badge and a Redirect line, and no further port is tried. MOTDs keep their colours; very dark ones are lightened. Java cards show the server icon next to the family. Under More, Bedrock cards list the ports the server announces. Per family the card shows one of: Online, Offline, Unreachable (rejected on the way), No DNS, Omitted, Unavailable (no route from the checker). A failed card has one status line per port tried: No response, Refused, Invalid data, Rejected or Failed, with the detail in brackets. Unreachable wins over Offline when no port answers and at least one was rejected. A 429 from the API is shown as a countdown. While the backend's copy of a probe answer is younger than 30 s, half its cache time, the page answers that probe itself. The answer looks exactly like the backend's: cached, with the age it has by then. It comes after 100 ms, so the check still shows its brief loading state.
 
 ## Development and build
 
@@ -105,6 +105,8 @@ The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the 
 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
 Variables: `FTP_TARGET_DIR` (optional, default `./` for an FTP user jailed at the target folder), `MC_BACKEND` (the API URL the page calls; empty disables checks), `LIVE_URL` (optional, the page URL with a trailing slash, verifies the upload).
+
+The page shows server icons as `data:` URLs. A Content-Security-Policy on the web host must allow them: `img-src 'self' data:`.
 
 For the live check, optionally add the secrets `LIVE_BEDROCK_HOST` (a dual-stack Bedrock server that is always up) and `LIVE_JAVA_HOST` (a Java server that is always up). Without them, those checks are skipped.
 

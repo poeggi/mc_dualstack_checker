@@ -4,7 +4,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -23,6 +25,9 @@ const (
 	// Real descriptions nest a few levels; each level parses its subtree
 	// again, so deep nesting would cost depth times size.
 	maxChatDepth = 16
+	// Largest server icon passed on, as a data URL. Most 64x64 icons need
+	// far less; the limit keeps cached results small.
+	iconMax = 16 << 10
 )
 
 // pingJava performs a Server List Ping (handshake + status request) over the
@@ -100,6 +105,7 @@ type javaStatus struct {
 		Max    int `json:"max"`
 	} `json:"players"`
 	Description json.RawMessage `json:"description"`
+	Favicon     string          `json:"favicon"`
 }
 
 func parseJavaStatus(raw []byte) (*ServerInfo, error) {
@@ -114,6 +120,8 @@ func parseJavaStatus(raw []byte) (*ServerInfo, error) {
 		PlayersOnline: st.Players.Online,
 		PlayersMax:    st.Players.Max,
 		MOTD:          stripFormatting(flattenChat(st.Description, 0)),
+		MOTDRaw:       formatted(legacyChat(st.Description, 0, chatStyle{})),
+		Icon:          serverIcon(st.Favicon),
 	}
 	if info.Version == "" && info.MOTD == "" {
 		return nil, probeError("empty status")
@@ -145,6 +153,118 @@ func flattenChat(raw json.RawMessage, depth int) string {
 		b.WriteString(flattenChat(e, depth+1))
 	}
 	return b.String()
+}
+
+// chatStyle is the formatting a chat component passes on to its children.
+type chatStyle struct {
+	color                                               string
+	bold, italic, underlined, strikethrough, obfuscated *bool
+}
+
+// Legacy codes of the named chat colours.
+var chatColors = map[string]byte{
+	"black": '0', "dark_blue": '1', "dark_green": '2', "dark_aqua": '3',
+	"dark_red": '4', "dark_purple": '5', "gold": '6', "gray": '7',
+	"dark_gray": '8', "blue": '9', "green": 'a', "aqua": 'b',
+	"red": 'c', "light_purple": 'd', "yellow": 'e', "white": 'f',
+}
+
+// legacyChat turns a chat component into text with legacy colour codes,
+// the form Bedrock servers and older Java servers send. A hex colour
+// becomes the sequence x followed by six digit codes. Every component
+// starts with a reset, so styles never leak into its siblings. Components
+// nested deeper than maxChatDepth are left out.
+func legacyChat(raw json.RawMessage, depth int, parent chatStyle) string {
+	if len(raw) == 0 || depth > maxChatDepth {
+		return ""
+	}
+	// A plain string at the top keeps its own codes; below, it takes the
+	// style of its parent.
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if depth == 0 || s == "" {
+			return s
+		}
+		return parent.codes() + s
+	}
+	var obj struct {
+		Text          string            `json:"text"`
+		Extra         []json.RawMessage `json:"extra"`
+		Color         string            `json:"color"`
+		Bold          *bool             `json:"bold"`
+		Italic        *bool             `json:"italic"`
+		Underlined    *bool             `json:"underlined"`
+		Strikethrough *bool             `json:"strikethrough"`
+		Obfuscated    *bool             `json:"obfuscated"`
+	}
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+	st := parent
+	if obj.Color != "" {
+		st.color = obj.Color
+	}
+	for _, f := range []struct{ own, into **bool }{
+		{&obj.Bold, &st.bold}, {&obj.Italic, &st.italic}, {&obj.Underlined, &st.underlined},
+		{&obj.Strikethrough, &st.strikethrough}, {&obj.Obfuscated, &st.obfuscated},
+	} {
+		if *f.own != nil {
+			*f.into = *f.own
+		}
+	}
+	var b strings.Builder
+	if obj.Text != "" {
+		b.WriteString(st.codes())
+		b.WriteString(obj.Text)
+	}
+	for _, e := range obj.Extra {
+		b.WriteString(legacyChat(e, depth+1, st))
+	}
+	return b.String()
+}
+
+// codes is the reset plus the legacy codes that set st.
+func (st chatStyle) codes() string {
+	const sect = "\u00a7"
+	out := sect + "r"
+	if c, ok := chatColors[st.color]; ok {
+		out += sect + string(c)
+	} else if len(st.color) == 7 && st.color[0] == '#' {
+		if _, err := strconv.ParseUint(st.color[1:], 16, 32); err == nil {
+			out += sect + "x"
+			for _, d := range strings.ToLower(st.color[1:]) {
+				out += sect + string(d)
+			}
+		}
+	}
+	for _, f := range []struct {
+		on   *bool
+		code string
+	}{{st.bold, "l"}, {st.italic, "o"}, {st.underlined, "n"}, {st.strikethrough, "m"}, {st.obfuscated, "k"}} {
+		if f.on != nil && *f.on {
+			out += sect + f.code
+		}
+	}
+	return out
+}
+
+var pngSignature = []byte("\x89PNG\r\n\x1a\n")
+
+// serverIcon returns the status favicon as a data URL when it is a 64x64
+// PNG within iconMax, else "". Some servers break the base64 into lines.
+func serverIcon(s string) string {
+	const prefix = "data:image/png;base64,"
+	s = strings.NewReplacer("\n", "", "\r", "").Replace(s)
+	if len(s) > iconMax || !strings.HasPrefix(s, prefix) {
+		return ""
+	}
+	png, err := base64.StdEncoding.DecodeString(s[len(prefix):])
+	// Signature, then the IHDR chunk: length, type, width, height.
+	if err != nil || len(png) < 24 || !bytes.Equal(png[:8], pngSignature) || string(png[12:16]) != "IHDR" ||
+		binary.BigEndian.Uint32(png[16:20]) != 64 || binary.BigEndian.Uint32(png[20:24]) != 64 {
+		return ""
+	}
+	return s
 }
 
 func appendVarint(b []byte, v int) []byte {

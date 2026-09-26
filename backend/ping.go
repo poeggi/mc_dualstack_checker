@@ -24,6 +24,19 @@ type ServerInfo struct {
 	Gamemode      string `json:"gamemode,omitempty"`
 	Map           string `json:"map,omitempty"`
 	ServerID      string `json:"server_id,omitempty"`
+	// MOTDRaw and MapRaw keep the colour codes; they are left out when
+	// the text has none.
+	MOTDRaw string `json:"motd_raw,omitempty"`
+	MapRaw  string `json:"map_raw,omitempty"`
+	Icon    string `json:"icon,omitempty"`
+	Port4   int    `json:"port4,omitempty"`
+	Port6   int    `json:"port6,omitempty"`
+}
+
+// SRVTarget is where a Java SRV record sends clients.
+type SRVTarget struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 // PingResult is the outcome of one probe against one address and port.
@@ -42,6 +55,7 @@ type PingResult struct {
 	IP     string      `json:"ip,omitempty"`
 	RTTms  int64       `json:"rtt_ms,omitempty"`
 	Error  string      `json:"error,omitempty"`
+	SRV    *SRVTarget  `json:"srv,omitempty"`
 	Info   *ServerInfo `json:"info,omitempty"`
 	Cached bool        `json:"cached,omitempty"`
 	AgeS   int         `json:"age_s"`
@@ -74,14 +88,18 @@ func ping(ctx context.Context, edition string, ip net.IP, port int, hostLabel st
 }
 
 // Longest server text kept. Status pages show a two-line MOTD; the other
-// fields are short names and numbers. The limits keep cached results small.
+// fields are short names and numbers. Colour codes can take more room than
+// the text they colour. The limits keep cached results small.
 const (
 	motdMax  = 256
+	rawMax   = 2048
 	fieldMax = 64
 )
 
 func (i *ServerInfo) clip() {
 	i.MOTD = clip(i.MOTD, motdMax)
+	i.MOTDRaw = clip(i.MOTDRaw, rawMax)
+	i.MapRaw = clip(i.MapRaw, rawMax)
 	for _, f := range []*string{&i.Edition, &i.Version, &i.Protocol, &i.Gamemode, &i.Map, &i.ServerID} {
 		*f = clip(*f, fieldMax)
 	}
@@ -178,6 +196,14 @@ func describe(err error) string {
 		return "refused (closed)"
 	}
 	return "failed (unknown error)"
+}
+
+// formatted returns s when it carries colour codes, else "".
+func formatted(s string) string {
+	if strings.ContainsRune(s, 0xA7) {
+		return s
+	}
+	return ""
 }
 
 // stripFormatting removes Minecraft "section sign" colour codes.
