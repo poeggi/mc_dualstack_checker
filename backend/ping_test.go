@@ -133,6 +133,20 @@ func TestParsePongPorts(t *testing.T) {
 	}
 }
 
+func TestHostName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Play_X.Example-1.net.":          "play_x.example-1.net",
+		"a b.example":                    "",
+		"ex!ample.net":                   "",
+		"a..example":                     "",
+		strings.Repeat("a", 64) + ".net": "",
+	} {
+		if got := hostName(in); got != want {
+			t.Errorf("hostName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSRVTarget(t *testing.T) {
 	got := srvTarget([]*net.SRV{{Target: ".", Port: 25565}, {Target: "mc.example.net.", Port: 0}, {Target: "MC.Example.net.", Port: 25577}})
 	if got == nil || got.Host != "mc.example.net" || got.Port != 25577 {

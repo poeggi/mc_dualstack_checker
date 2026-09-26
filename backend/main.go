@@ -111,15 +111,9 @@ func main() {
 }
 
 // hostName returns host as a lowercase DNS name without a trailing dot, or
-// "" unless it consists of letters, digits and hyphens in labels of at most
-// 63 characters.
+// "" unless it consists of letters, digits, hyphens and underscores in
+// labels of at most 63 characters, the characters resolvers accept.
 func hostName(host string) string {
-	return dnsName(host, "-")
-}
-
-// dnsName is hostName with the characters besides letters and digits
-// given in extra.
-func dnsName(host, extra string) string {
 	name := strings.ToLower(strings.TrimSuffix(host, "."))
 	if name == "" || len(name) > maxHostLen {
 		return ""
@@ -129,7 +123,7 @@ func dnsName(host, extra string) string {
 			return ""
 		}
 		for _, c := range label {
-			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && !strings.ContainsRune(extra, c) {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 				return ""
 			}
 		}
@@ -223,11 +217,10 @@ func lookupSRV(ctx context.Context, name string) *SRVTarget {
 }
 
 // srvTarget is the first usable record, in the resolver's order of
-// priority and weight. A target of "." offers no service. Targets may
-// contain underscores; clients resolve those too.
+// priority and weight. A target of "." offers no service.
 func srvTarget(addrs []*net.SRV) *SRVTarget {
 	for _, a := range addrs {
-		if host := dnsName(a.Target, "-_"); host != "" && a.Port != 0 {
+		if host := hostName(a.Target); host != "" && a.Port != 0 {
 			return &SRVTarget{Host: host, Port: int(a.Port)}
 		}
 	}
