@@ -53,7 +53,6 @@ function backend(string $endpoint): array {
     });
     $raw    = curl_exec($ch);
     $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
     if ($raw === false || json_decode($raw) === null) {
         return [0, null, null];
     }

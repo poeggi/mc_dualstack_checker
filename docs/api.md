@@ -72,6 +72,7 @@ More `info` fields:
 
 - `motd_raw`, `map_raw`: the text with its formatting codes, a section sign plus one character. Left out when there are none. Java colours become such codes too; a hex colour is `x` followed by six codes of one digit each.
 - `icon`: the Java server icon as a `data:image/png;base64,` URL. Only 64x64 PNGs of at most 16 KiB are passed on.
+- `protocol`: for Java, `-1` when the server accepts several game versions. The probe asks with protocol -1, and such servers, proxies mostly, answer with the number they are asked with.
 - `port4`, `port6`: the ports a Bedrock server announces. They are its own settings, meant for LAN discovery. Behind port forwarding they differ from the probed port.
 
 States:

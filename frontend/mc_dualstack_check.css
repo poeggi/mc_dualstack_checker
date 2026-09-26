@@ -277,7 +277,7 @@ button.btn-active::after {
 .ip-row { display: flex; align-items: baseline; gap: .75rem; }
 .ip-row:last-child { border-bottom: none; }
 .ip-row-key { min-width: 10ch; flex-shrink: 0; white-space: nowrap; overflow-wrap: normal; }
-.ip-row-key.hint { cursor: help; text-decoration: underline dotted; text-underline-offset: .2em; }
+.ip-row-key.hint { cursor: help; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: .2em; }
 
 .port-used   { color: var(--green); }
 .port-struck { color: var(--red); text-decoration: line-through; }
@@ -291,6 +291,7 @@ button.btn-active::after {
 .card-extra-toggle:checked ~ .ip-row-toggle .toggle-less { display: inline; }
 .ip-row-toggle {
     cursor: pointer;
+    -webkit-user-select: none;
     user-select: none;
     border-top: 1px dashed var(--border);
 }

@@ -479,7 +479,7 @@ var MC_COLORS = ["000000", "0000aa", "00aa00", "00aaaa", "aa0000", "aa00aa", "ff
 var MIN_LIGHTNESS = 120;
 
 function readable(hex) {
-    var c = [0, 2, 4].map(function (i) { return parseInt(hex.substr(i, 2), 16); });
+    var c = [0, 2, 4].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); });
     var l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
     if (l < MIN_LIGHTNESS) {
         var mix = (MIN_LIGHTNESS - l) / (255 - l);
@@ -599,7 +599,7 @@ function ipCard(r, label) {
 
         var extra = [
             ["Map", info.map && (info.map_raw ? mcText(info.map_raw) : info.map)], ["Gamemode", info.gamemode],
-            ["Protocol", info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
+            ["Protocol", info.protocol === "-1" ? "-1 (any)" : info.protocol], ["Edition", info.edition], ["Announced", announced(info)],
             ["Server ID", info.server_id]
         ].filter(function (kv) { return kv[1]; });
         if (extra.length) {

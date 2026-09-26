@@ -25,7 +25,7 @@ if [ -n "$missing" ]; then
     elif command -v zypper >/dev/null 2>&1; then
         zypper -n -q install $pkgs
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -Sy --noconfirm --needed $pkgs
+        pacman -Syu --noconfirm --needed $pkgs
     else
         echo "no known package manager; install:$missing" >&2
         exit 1

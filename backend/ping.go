@@ -191,7 +191,7 @@ func rejection(err error) string {
 	switch {
 	case errors.Is(err, syscall.EHOSTUNREACH):
 		return "no route to host"
-	case errors.Is(err, syscall.EHOSTDOWN), errors.Is(err, syscall.ENONET):
+	case errors.Is(err, syscall.EHOSTDOWN), noNetwork(err):
 		return "host unknown"
 	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
 		return "prohibited"
