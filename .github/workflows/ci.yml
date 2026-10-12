@@ -56,7 +56,7 @@ jobs:
         run: |
           ! grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html backend/www/*.html
       - run: php -l frontend/api.php
-      - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh && sh -n .github/stamp.sh && sh -n .github/image.sh
+      - run: sh -n test/backend.sh && sh -n test/live.sh && sh -n .github/stamp.sh && sh -n .github/image.sh
       - name: ascii only
         run: |
           ! git ls-files -z ':!*.png' | xargs -0 env LC_ALL=C grep -n '[^ -~	]'

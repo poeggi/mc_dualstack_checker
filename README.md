@@ -26,7 +26,6 @@ Co-developed with Claude, Anthropic's AI assistant.
 
 - `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. It also serves the API host's pages from `www/`. One static binary, shipped as a container image (`Dockerfile`).
 - `frontend/` - the page plus `api.php` for the web host. `.htaccess` sets up the web host.
-- `deploy/` - setup for a VM without containers: systemd units, Caddy config, the release puller.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
 - `.github/workflows/` - CI on push, deploys on release. `.github/stamp.sh` and `.github/image.sh` do the release's steps.
@@ -102,29 +101,6 @@ The release workflow builds the image and runs it once. It pushes it signed and 
 
 The backend serves the landing page, the usage page and a `robots.txt` from `backend/www/`. The `robots.txt` asks all crawlers, AI crawlers included, to stay away; it is a request, the limits are what hold. Pages are revalidated on every load; their scripts, styles and icons are cached for an hour under version-stamped URLs. The usage files under `/stats/` come from the state directory. `/health` reports the running version.
 
-### Backend (Linux VM without containers)
-
-Each release still carries binaries and deploy files for a VM set up from `deploy/`. One-time setup on the VM, with git installed:
-
-```bash
-git clone https://github.com/poeggi/mc_dualstack_checker && sudo sh mc_dualstack_checker/deploy/bootstrap.sh
-```
-
-This installs the backend as a systemd service (user `mcdc`, port 8080 on loopback), Caddy for TLS on 443 (Let's Encrypt), and the `mcdc-tick` timer. It installs missing tools with the distribution's package manager and opens TCP 443 in firewalld or ufw when one is active. The backend binary and the pages come from the latest release, installed by the first tick. A cloud firewall in front of the VM must allow it too. Only port 443 is needed: Caddy gets and renews its certificate over it.
-
-`mcdc-tick` runs every 7 minutes as root and does four things:
-
-- It keeps Caddy at the version pinned in the script.
-- It installs the latest GitHub release whenever its `SHA256SUMS` changes, so a release published again under the same tag counts too. That covers the backend binary and, from `deploy.tar.gz`, the Caddy config, the pages (stamped with the release), the systemd units and `mcdc-tick` itself. Outbound only, no deploy credentials.
-- It keeps Caddy's `trusted_proxies` at the current addresses of the web host's DNS name, the `# trusted-host` line in `deploy/Caddyfile`. It resolves the name through the VM's normal resolver and reloads Caddy only when the addresses change; if the name does not resolve, the addresses stay. The addresses in the Caddyfile are the fallback.
-- It keeps the CPU busy for 30 s, about 7 % average load. Some free-tier clouds reclaim VMs whose CPU looks idle for days. To turn this off, set `Environment=BUSY_SECONDS=0` in a drop-in (`systemctl edit mcdc-tick`); releases replace the unit file itself, not drop-ins.
-
-So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
-
-Caddy serves the API publicly, plus the pages from `backend/www/` and the usage files from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes.
-
-The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the VM's deploy files into `deploy.tar.gz`, its pages stamped with the release, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
-
 ### Frontend (FTPS to the web host)
 
 Secrets: `FTP_HOST`, `FTP_USER`, `FTP_PASS`.
@@ -140,6 +116,6 @@ The workflow writes `MC_BACKEND` and the release tag into the page and into `api
 
 1. Merge to `main`, CI passes.
 2. Create a GitHub release with a tag like `v1.0.0`.
-3. The release workflow publishes the image and attaches the backend binaries and the deploy files; the frontend deploy uploads the page. Check the Actions tab.
+3. The release workflow publishes the image; the frontend deploy uploads the page. Check the Actions tab.
 
 The frontend deploy runs in the `production` environment.
