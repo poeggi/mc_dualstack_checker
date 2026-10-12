@@ -67,8 +67,8 @@ policy() {
 # pull <ref> <arch>: copies the image through the policy.
 pull() {
     rm -rf "$tmp/pulled"
-    skopeo --policy "$tmp/policy.json" copy --quiet --src-tls-verify="$tls" \
-        --override-os linux --override-arch "$2" "docker://$1" "dir:$tmp/pulled"
+    skopeo --policy "$tmp/policy.json" --override-os linux --override-arch "$2" \
+        copy --quiet --src-tls-verify="$tls" "docker://$1" "dir:$tmp/pulled"
 }
 openssl ecparam -name prime256v1 -genkey -noout | openssl ec -pubout -out "$tmp/other.pub" 2>/dev/null
 
