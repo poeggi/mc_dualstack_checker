@@ -10,14 +10,19 @@
 //	    &id=<connection id>                               -> Java only
 //	GET /health
 //
-// Listens on loopback only; Caddy in front is the public side.
+// Everything else is the host's own pages, see site.go.
+// Listens on loopback only; a reverse proxy in front is the public side.
 // Environment: PORT, ALLOWED_ORIGINS, FILTER_INTERNAL_TARGETS (default true),
-// STATE_DIRECTORY (set by systemd; where the usage numbers are written).
+// STATE_DIRECTORY (where the usage numbers are written).
+// With -health it asks the running instance for /health and exits 0 when
+// the instance answers: the container health check, since the image holds
+// no other program.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -56,9 +61,14 @@ var filterInternal = true
 var ipv6Egress atomic.Bool
 
 func main() {
+	health := flag.Bool("health", false, "check the running instance's /health and exit")
+	flag.Parse()
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+	if *health {
+		os.Exit(healthCheck(port))
 	}
 	origins := strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",")
 	if v, err := strconv.ParseBool(os.Getenv("FILTER_INTERNAL_TARGETS")); err == nil {
@@ -93,13 +103,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", endpoint(origins, handlePing))
 	mux.HandleFunc("/health", endpoint(origins, handleHealth))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		httpError(w, http.StatusNotFound, "unknown endpoint")
-	})
+	mux.HandleFunc("/", siteHandler(statsDir))
 
 	srv := &http.Server{
 		Addr:              "127.0.0.1:" + port,
-		Handler:           mux,
+		Handler:           secured(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      resolveTimeout + pingTimeout + 2*time.Second,
 		// Longer than the reverse proxy keeps idle connections (2 min in
@@ -274,6 +282,29 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "version": version, "ipv6": ipv6Egress.Load()})
+}
+
+// healthCheck asks the instance on port for /health. A 429 counts as an
+// answer too: the instance runs, only its health limit was reached.
+func healthCheck(port string) int {
+	c := http.Client{Timeout: 3 * time.Second}
+	resp, err := c.Get("http://127.0.0.1:" + port + "/health")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer resp.Body.Close()
+	var h struct {
+		OK bool `json:"ok"`
+	}
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return 0
+	case resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&h) != nil || !h.OK:
+		fmt.Fprintln(os.Stderr, "unhealthy:", resp.Status)
+		return 1
+	}
+	return 0
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

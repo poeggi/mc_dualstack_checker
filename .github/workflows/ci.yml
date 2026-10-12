@@ -28,6 +28,22 @@ jobs:
       - name: backend checks
         run: sh test/backend.sh
 
+  # The release path of the image against a local registry, with a
+  # throwaway signing key: build, run, push signed, verify, move the major tag.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: build, run, push signed, verify
+        run: |
+          docker run -d -p 127.0.0.1:5000:5000 docker.io/library/registry:3
+          k=$RUNNER_TEMP/throwaway
+          printf 'throwaway' > "$k.pass"
+          skopeo generate-sigstore-key --output-prefix "$k" --passphrase-file "$k.pass"
+          sh .github/stamp.sh v0.0.0
+          SIGNING_KEY=$k.private SIGNING_PASSPHRASE=$k.pass PUBLIC_KEY=$k.pub TLS_VERIFY=false \
+            sh .github/image.sh localhost:5000/mc_dualstack_check v0.0.0
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -38,9 +54,9 @@ jobs:
       - run: node --check frontend/mc_dualstack_check.js
       - name: local includes carry a version stamp
         run: |
-          ! grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html deploy/www/*.html
+          ! grep -n -E '<(link|script|img)[^>]*(href|src)="[^"?:]+"' frontend/index.html backend/www/*.html
       - run: php -l frontend/api.php
-      - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh
+      - run: sh -n deploy/bootstrap.sh && sh -n deploy/mcdc-tick && sh -n test/backend.sh && sh -n test/live.sh && sh -n .github/stamp.sh && sh -n .github/image.sh
       - name: ascii only
         run: |
           ! git ls-files -z ':!*.png' | xargs -0 env LC_ALL=C grep -n '[^ -~	]'

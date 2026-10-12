@@ -8,9 +8,9 @@ package main
 // addresses.
 // One worker owns all numbers. Requests hand it a sample without waiting.
 // Only finished periods are published, one file per kind of period under
-// stats/, rewritten when a period of that kind ends; Caddy serves them as
-// static files. The worker's own state is written after new requests, so
-// the numbers survive restarts.
+// stats/, rewritten when a period of that kind ends; site.go serves them.
+// The worker's own state is written after new requests, so the numbers
+// survive restarts.
 
 import (
 	"crypto/rand"

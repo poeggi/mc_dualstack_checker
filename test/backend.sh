@@ -85,6 +85,14 @@ check "unknown endpoint -> 404"     is "$B/nope" 404
 check "unknown endpoint: JSON error" json "$B/nope" "d['error']"
 check "POST -> 405 with JSON"       sh -c "curl -s -X POST -w '%{http_code}' '$B/ping' | tr -d '\n' | grep -q '\"error\".*405\$'"
 
+echo "== pages"
+check "landing page"                is "$B/" 200
+check "usage page"                  is "$B/stats" 200
+check "usage numbers served"        json "$B/stats/minutes.json" "isinstance(d['periods'], list)"
+check "state file hidden"           is "$B/stats/stats.state" 404
+check "landing page CSP"            sh -c "curl -s -D - -o /dev/null '$B/' | tr -d '\r' | grep -qi \"^content-security-policy: default-src 'none'\""
+check "script cached for an hour"   sh -c "curl -s -D - -o /dev/null '$B/stats.js' | tr -d '\r' | grep -qi '^cache-control: public, max-age=3600\$'"
+
 echo "== connection IDs"
 CLIENT=198.51.100.5
 check "id with bedrock -> 400"      is "$B/ping?ip=127.0.0.1&port=9&edition=bedrock&id=x" 400

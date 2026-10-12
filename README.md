@@ -24,12 +24,13 @@ Co-developed with Claude, Anthropic's AI assistant.
 
 ## Layout
 
-- `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. One static binary.
+- `backend/` - the backend service: `/ping` probes one address, `/health` reports its state. It also serves the API host's pages from `www/`. One static binary, shipped as a container image (`Dockerfile`).
 - `frontend/` - the page plus `api.php` for the web host. `.htaccess` sets up the web host.
-- `deploy/` - VM setup: systemd units, Caddy config, the release puller, the API landing page.
+- `deploy/` - setup for a VM without containers: systemd units, Caddy config, the release puller.
 - `test/` - backend checks (CI) and live end-to-end checks.
 - `docs/api.md` - API reference.
-- `.github/workflows/` - CI on push, deploys on release.
+- `.github/workflows/` - CI on push, deploys on release. `.github/stamp.sh` and `.github/image.sh` do the release's steps.
+- `cosign.pub` - the public key the images are signed with.
 
 ## API
 
@@ -75,12 +76,35 @@ CI runs the first two on pushes to main and on pull requests. The "Live check" w
 
 Both workflows run on a published GitHub release.
 
-### Backend (Linux VM with systemd)
+### Backend (container image)
 
 The backend needs a host with native IPv4 and IPv6 egress: a public IPv4 and a global IPv6 address. 
 A live instance of the service runs as `mcdscheck-api.poggensee.it`.
 
-One-time setup on the VM, with git installed:
+Each release publishes the image `ghcr.io/poeggi/mc_dualstack_checker` for `linux/amd64` and `linux/arm64`. It is tagged with the version (`2.0.4`) and the major version (`2`). Following the major tag gets every release without breaking API changes. The image holds the backend and its pages, stamped with the release.
+
+```bash
+podman run -d --network host -v /var/lib/mc-dualstack-check:/state:U -e ALLOWED_ORIGINS='*' ghcr.io/poeggi/mc_dualstack_checker:2
+```
+
+- It needs the host's network: the probes use the host's IPv4 and IPv6.
+- It listens on `127.0.0.1:8080` only. Put a reverse proxy with TLS in front that passes every path on and sets `X-Forwarded-For`.
+- It sets its own response headers: security policy and caching.
+- The usage numbers go to `/state`. Mount a directory there to keep them across updates.
+- `/mc_dualstack_check -health` is the health check. It exits 0 when the running instance answers.
+
+The images are signed with the key in `cosign.pub`. The sigstore signatures are stored next to the image. Podman accepts only signed images with two settings:
+
+- `registries.d`: `use-sigstore-attachments: true` for the image.
+- `policy.json`: a `sigstoreSigned` rule with `keyPath` pointing to `cosign.pub` and `signedIdentity` of type `matchRepository`. The signature names the version tag, so a host that pulls the major tag needs this.
+
+The release workflow builds the image and runs it once. It pushes it signed and pulls it back through such a policy. A policy with another key must refuse it. Only then does the major tag move (`.github/image.sh`). CI runs the same steps against a local registry with a throwaway key.
+
+The backend serves the landing page, the usage page and a `robots.txt` from `backend/www/`. The `robots.txt` asks all crawlers, AI crawlers included, to stay away; it is a request, the limits are what hold. Pages are revalidated on every load; their scripts, styles and icons are cached for an hour under version-stamped URLs. The usage files under `/stats/` come from the state directory. `/health` reports the running version.
+
+### Backend (Linux VM without containers)
+
+Each release still carries binaries and deploy files for a VM set up from `deploy/`. One-time setup on the VM, with git installed:
 
 ```bash
 git clone https://github.com/poeggi/mc_dualstack_checker && sudo sh mc_dualstack_checker/deploy/bootstrap.sh
@@ -97,7 +121,7 @@ This installs the backend as a systemd service (user `mcdc`, port 8080 on loopba
 
 So `bootstrap.sh` runs once per VM. Changes to `deploy/` arrive with the next release. A release can change what runs as root on the VM, so whoever can publish releases controls the VM.
 
-Caddy serves the API publicly, plus a landing page, the usage page and a `robots.txt` from `deploy/www/`. The `robots.txt` asks all crawlers, AI crawlers included, to stay away; it is a request, the limits are what hold. Pages are revalidated on every load; their scripts, styles and icons are cached for an hour under version-stamped URLs. It serves the backend's usage files under `/stats/` from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes. `/health` reports the running version.
+Caddy serves the API publicly, plus the pages from `backend/www/` and the usage files from the backend's state directory `/var/lib/mc-dualstack-check`. It trusts forwarded client addresses from the web host only. If the web host's addresses change, that trust follows its DNS name within about 7 minutes.
 
 The release workflow builds `linux/amd64` and `linux/arm64` binaries, packs the VM's deploy files into `deploy.tar.gz`, its pages stamped with the release, and attaches them with `SHA256SUMS` to the release. The VM picks them up within 7 minutes.
 
@@ -116,6 +140,6 @@ The workflow writes `MC_BACKEND` and the release tag into the page and into `api
 
 1. Merge to `main`, CI passes.
 2. Create a GitHub release with a tag like `v1.0.0`.
-3. The release workflow attaches the backend binaries and the deploy files; the frontend deploy uploads the page. Check the Actions tab.
+3. The release workflow publishes the image and attaches the backend binaries and the deploy files; the frontend deploy uploads the page. Check the Actions tab.
 
 The frontend deploy runs in the `production` environment.
